@@ -2,12 +2,14 @@ import os
 import tempfile
 import shutil
 import re
+import math
 import zipfile
 from datetime import datetime
 from copy import copy
 import pandas as pd
 import numpy as np
 import polars as pl
+from python_calamine import CalamineWorkbook
 from openpyxl import load_workbook, Workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill, Alignment, Font, Border, Side
@@ -205,7 +207,6 @@ class ExcelDataProcessor:
             msv_col_name = data.columns[idx_msv_data]
             matched_msvs = data.loc[mask, msv_col_name].unique().tolist()
 
-            # ĐÃ SỬA LỖI TYPO Ở DÒNG DƯỚI ĐÂY: Thêm 'kw in'
             if any(kw in kj for kw in filter_keywords):
                 if kc not in assigned: assigned[kc] = set()
                 final_msvs = [m for m in matched_msvs if m not in assigned[kc]]
@@ -355,7 +356,253 @@ def format_excel_date(cell):
 # CÁC HÀM XỬ LÝ (WRAPPERS)
 # ==========================================
 
-# --- GOM ĐIỂM UNI ---
+# --- CHỨC NĂNG MỚI: GOM ĐIỂM (Khắt khe - Form BGD) ---
+def clean_value_gom_diem(val):
+    if val is None: return ""
+    if isinstance(val, float):
+         if math.isnan(val): return ""
+         if val.is_integer(): return str(int(val))
+    s = str(val).strip()
+    if s.endswith(".0") and s[:-2].lstrip("-").isdigit(): return s[:-2]
+    return s
+
+def extract_meta_gom_diem(df_str, row_idx, col_idx):
+    try:
+        if row_idx < df_str.height and col_idx < df_str.width:
+            val = str(df_str.item(row_idx, col_idx))
+            if ":" in val: return val.split(":", 1)[1].strip()
+    except Exception: pass
+    return ""
+
+def extract_meta_multi_gom_diem(df_str, row_idx, col_indices):
+    for col_idx in col_indices:
+        try:
+            if row_idx < df_str.height and col_idx < df_str.width:
+                val = str(df_str.item(row_idx, col_idx))
+                if ":" in val: return val.split(":", 1)[1].strip()
+        except Exception: pass
+    return ""
+
+def gom_diem_logic(msv_path, data_dir):
+    df_input = pl.read_excel(msv_path, engine="calamine")
+    if 'TKSV' not in df_input.columns:
+        raise ValueError("Không tìm thấy cột 'TKSV' trong file đầu vào.")
+    
+    raw_ids = df_input.drop_nulls(subset=["TKSV"])["TKSV"].to_list()
+    student_ids_to_find = {clean_value_gom_diem(x) for x in raw_ids if clean_value_gom_diem(x) != ""}
+    if not student_ids_to_find:
+        raise ValueError("Cột 'TKSV' không có dữ liệu hợp lệ.")
+    
+    results_list = []
+    search_list = list(student_ids_to_find)
+    final_order = [
+        'MSV Tìm thấy', 'Nguồn (File)', 'Sheet', 'TT', 'Họ và tên', 'Ngày sinh', 'Lớp',
+        'Mã học phần', 'Tên học phần', 'Ngày thi', 'Ca thi', 'Đề số/ Mã đề',
+        'Quá trình', 'Kiểm tra', 'Đề án', 'Thi', 'BTL', 'BCHC', 'Vấn đáp', 'TB', 'Tổng kết', 'Ghi chú'
+    ]
+    
+    for dirpath, _, filenames in os.walk(data_dir):
+        for filename in filenames:
+            if filename.lower().endswith(('.xlsx', '.xls')) and filename.lower() != 'result.xlsx' and not filename.startswith('~$'):
+                filepath = os.path.join(dirpath, filename)
+                try:
+                    wb = CalamineWorkbook.from_path(filepath)
+                    for sheet_name in wb.sheet_names:
+                        sheet = wb.get_sheet_by_name(sheet_name)
+                        try: raw_data = sheet.to_python(skip_empty_area=False)
+                        except TypeError: raw_data = sheet.to_python()
+                        
+                        if not raw_data: continue
+                        max_cols = max(len(row) for row in raw_data)
+                        if max_cols == 0: continue
+                            
+                        str_data = []
+                        for row in raw_data:
+                            str_row = [clean_value_gom_diem(val) for val in row]
+                            if len(str_row) < max_cols:
+                                str_row.extend([""] * (max_cols - len(str_row)))
+                            str_data.append(str_row)
+                        
+                        df_str = pl.DataFrame(str_data, orient="row")
+                        a1_val = df_str.item(0, 0) if df_str.height > 0 and df_str.width > 0 else ""
+                        a1_val_clean = ' '.join(str(a1_val).lower().split())
+                        is_bgd = (a1_val_clean == "bộ giáo dục và đào tạo")
+                        
+                        ten_hp, ma_hp, ngay_thi, ca_thi = "", "", "", ""
+                        max_row_idx = df_str.height - 1
+                        
+                        if is_bgd:
+                            start_row_idx = 13
+                            ten_hp = extract_meta_gom_diem(df_str, 5, 0)
+                            ma_hp = extract_meta_gom_diem(df_str, 6, 0)
+                            ngay_thi = extract_meta_multi_gom_diem(df_str, 6, [7, 8, 9])
+                            ca_thi = extract_meta_multi_gom_diem(df_str, 7, [7, 8, 9])
+                        else:
+                            start_row_idx = 1
+
+                        if df_str.height > start_row_idx:
+                            df_search_area = df_str.slice(start_row_idx)
+                            mask = pl.any_horizontal([pl.col(c).is_in(search_list) for c in df_search_area.columns])
+                            matched_str_data = df_search_area.filter(mask)
+                        else:
+                            matched_str_data = pl.DataFrame()
+                        
+                        if not matched_str_data.is_empty():
+                            header_map = {}
+                            for col_idx_num, _ in enumerate(df_str.columns):
+                                header_vals = []
+                                if is_bgd:
+                                    for r_idx in [10, 11, 12]:
+                                        if r_idx <= max_row_idx:
+                                            val = df_str.item(r_idx, col_idx_num)
+                                            if val and str(val).lower() != 'nan' and str(val).strip():
+                                                header_vals.append(' '.join(str(val).lower().split()))
+                                else:
+                                    if 0 <= max_row_idx:
+                                        val = df_str.item(0, col_idx_num)
+                                        if val and str(val).lower() != 'nan' and str(val).strip():
+                                            header_vals.append(' '.join(str(val).lower().split()))
+                                header_map[col_idx_num] = header_vals
+
+                            for row_tuple in matched_str_data.iter_rows():
+                                matched_id = "Không xác định"
+                                for val in row_tuple:
+                                    if val in student_ids_to_find:
+                                        matched_id = val
+                                        break
+
+                                result_row = {col: "" for col in final_order}
+                                result_row['MSV Tìm thấy'] = matched_id
+                                result_row['Nguồn (File)'] = filename
+                                result_row['Sheet'] = sheet_name
+                                
+                                if is_bgd:
+                                    result_row['Mã học phần'] = ma_hp
+                                    result_row['Tên học phần'] = ten_hp                                            
+                                    result_row['Ngày thi'] = ngay_thi
+                                    result_row['Ca thi'] = ca_thi
+
+                                skip_next_col_for_name = False
+                                for i in range(len(row_tuple)):
+                                    if skip_next_col_for_name:
+                                        skip_next_col_for_name = False
+                                        continue
+
+                                    val_to_add = row_tuple[i]
+                                    raw_headers = header_map.get(i, [])
+                                    if not raw_headers: continue 
+
+                                    NAME_HEADERS = {'họ và tên', 'họ tên', 'họ và', 'họ', 'họ lót', 'họ đệm', 'tên'}
+                                    matched_name_header = ""
+                                    for rh in raw_headers:
+                                        if rh in NAME_HEADERS:
+                                            matched_name_header = rh
+                                            break
+
+                                    if matched_name_header:
+                                        if val_to_add:
+                                            val_to_add = str(val_to_add).strip()
+                                            if matched_name_header != 'tên':
+                                                result_row['Họ và tên'] = (result_row['Họ và tên'] + " " + val_to_add).strip()
+                                            else:
+                                                if val_to_add not in result_row['Họ và tên']:
+                                                    result_row['Họ và tên'] = (result_row['Họ và tên'] + " " + val_to_add).strip()
+
+                                        if i + 1 < len(row_tuple) and matched_name_header != 'tên':
+                                            next_headers = header_map.get(i + 1, [])
+                                            is_next_target = False
+                                            if not next_headers: is_next_target = True
+                                            else:
+                                                for nh in next_headers:
+                                                    if nh in {'tên'}:
+                                                        is_next_target = True
+                                                        break
+                                            if is_next_target:
+                                                next_val = row_tuple[i + 1]
+                                                if next_val: result_row['Họ và tên'] = (result_row['Họ và tên'] + " " + str(next_val).strip()).strip()
+                                                skip_next_col_for_name = True
+                                        continue
+
+                                    mapping_rules = {
+                                        'TT': ['tt', 'stt'],
+                                        'Ngày sinh': ['ngày sinh'],
+                                        'Lớp': ['lớp'],
+                                        'Mã học phần': ['mã học phần', 'mã môn', 'mã học phần (module)'],
+                                        'Tên học phần': ['tên học phần', 'tên môn', 'tên học phần (module)'],                                                
+                                        'Ngày thi': ['ngày thi'],
+                                        'Ca thi': ['ca thi'],
+                                        'Đề số/ Mã đề': ['đề số/ mã đề', 'đề số/mã đề', 'đề số', 'mã đề', 'đề thi'],
+                                        'Quá trình': ['quá trình', 'đqt', 'điểm quá trình', 'điểm qt', 'qt'],
+                                        'Kiểm tra': ['kiểm tra', 'đkt', 'kiểm tra(10%)', 'kiểm tra (10%)', 'điểm kiểm tra', 'điểm kt', 'kt'],
+                                        'Đề án': ['đề án', 'đề án(70%)', 'đề án (70%)'],
+                                        'Thi': ['thi', 'điểm thi'],
+                                        'BTL': ['btl', 'bài tập lớn', 'điểm btl'],
+                                        'BCHC': ['bchc', 'điểm bchc', 'điểmbchc', 'điểm bchc (đvới môn có điểm bchc trên ht)'],
+                                        'Vấn đáp': ['vấn đáp', 'vđ', 'vđ(30%)', 'vđ (30%)', 'điểm vđ', 'điểm vấn đáp'],
+                                        'TB': ['tb', 'tb (btl+vđ)/2', 'thi (đề án (70%)+vđ (30%)', 'thi(đềán(70%)+vđ(30%)', 'đề án+vđ', 'tb(btl+vđ)/2', 'tb(bchc+vđ)/2', 'tb(đề án+vđ)/2', 'trung bình', 'điểm tb'],
+                                        'Tổng kết': ['điểm học phần', 'tổng kết', 'điểm tổng kết', 'điểm tk', 'điểm học phần (100%)'],
+                                        'Ghi chú': ['ghi chú']
+                                    }
+
+                                    for std_col, keywords in mapping_rules.items():
+                                        matched = False
+                                        for rh in raw_headers:
+                                            rh_no_space = rh.replace(" ", "")
+                                            for kw in keywords:
+                                                kw_no_space = kw.replace(" ", "")
+                                                if rh == kw or rh_no_space == kw_no_space:
+                                                    matched = True
+                                                    break 
+                                            if matched: break
+                                        if matched:
+                                            if result_row[std_col] == "": result_row[std_col] = val_to_add
+                                            break
+                                results_list.append(result_row)
+                except Exception:
+                    pass
+
+    if results_list:
+        merged_dict = {}
+        for row in results_list:
+            msv = row.get('MSV Tìm thấy', '')
+            ma_hp = row.get('Mã học phần', '')
+            key = (msv, ma_hp)
+            if key not in merged_dict:
+                merged_dict[key] = row.copy()
+            else:
+                existing_row = merged_dict[key]
+                for col in final_order:
+                    val_old = str(existing_row.get(col, "")).strip()
+                    val_new = str(row.get(col, "")).strip()
+                    if col == 'Tên học phần':
+                        if (not val_old or val_old.lower() == 'result') and (val_new and val_new.lower() != 'result'):
+                            existing_row[col] = val_new
+                    else:
+                        if not val_old and val_new:
+                            existing_row[col] = val_new
+                            
+        results_list = list(merged_dict.values())
+        df_results = pl.DataFrame(results_list).select(final_order)
+        output_path = os.path.join(data_dir, 'Result.xlsx')
+        
+        final_df = df_results.to_pandas()
+        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+            final_df.to_excel(writer, index=False, sheet_name='DuLieuTrichXuat')
+            worksheet = writer.sheets['DuLieuTrichXuat']
+            for idx, col in enumerate(worksheet.columns, 1):
+                max_length = 0
+                column_letter = col[0].column_letter
+                for cell in col:
+                    try:
+                        if len(str(cell.value)) > max_length: max_length = len(str(cell.value))
+                    except: pass
+                adjusted_width = min((max_length + 2), 50)
+                worksheet.column_dimensions[column_letter].width = adjusted_width
+        return output_path
+    else:
+        raise ValueError("Quá trình quét kết thúc. Không tìm thấy dữ liệu nào trùng khớp với danh sách TKSV.")
+
+# --- CÁC HÀM CŨ ĐƯỢC GIỮ NGUYÊN (Không thay đổi) ---
 def gom_diem_uni_logic(msv_path, data_dir):
     msv_df = pl.read_excel(msv_path, engine="calamine")
     if len(msv_df.columns) == 0:
@@ -417,7 +664,7 @@ def gom_diem_uni_logic(msv_path, data_dir):
                     matched_rows.insert(2, 'Đường_Dẫn_File', filename)
                     
                     all_matched_data.append(matched_rows)
-        except Exception as e:
+        except Exception:
             pass
 
     if all_matched_data:
@@ -1045,7 +1292,8 @@ with st.sidebar:
         "Gộp File Nguồn": "Gộp File Nguồn",
         "Tra cứu điểm sinh viên (Cả lớp)": "Tra cứu điểm sinh viên (Cả lớp)", 
         "Kiểm tra ĐK Đăng ký (Cả lớp)": "Kiểm tra điều kiện đăng ký môn học (Cả lớp)", 
-        "Gom điểm UNI": "Gom điểm UNI", 
+        "Gom điểm UNI": "Gom điểm UNI",
+        "Gom điểm": "Gom điểm", # CHỨC NĂNG MỚI THÊM VÀO
         "Điền KHLM (Updated) (*)": "Điền KHLM (Updated) (*)",
         "Kiểm tra KHLM (*)": "Kiểm tra KHLM", 
         "Lọc KQHT Sinh viên": "Lọc kết quả học tập của sinh viên",
@@ -1062,7 +1310,7 @@ with st.sidebar:
     choice = menu_options[selected_label]
     
     st.markdown("---")
-    st.caption("Ver 8.1 | Bug Fixed")
+    st.caption("Ver 9.0 | Polars/Rust Integrated")
 
 # ==========================================
 # GIAO DIỆN CHÍNH (SINGLE-SCREEN GRID LAYOUT)
@@ -1077,6 +1325,7 @@ st.markdown(f"""
 instructions = {
     "Gộp File Nguồn": "Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa (Mỗi sheet chứa bảng đăng ký).",
     "Gom điểm UNI": "<b>Trích xuất dữ liệu đa File (Powered by Polars & Rust):</b><br><br><b>1. File MSV:</b> Tải lên file Excel chứa danh sách Mã SV (ở cột đầu tiên) vào ô bên trái.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel cần quét vào khu vực bên phải.<br><br><b>Kết quả:</b> Hệ thống quét vét cạn và trả về file tổng hợp <code>Result.xlsx</code>.",
+    "Gom điểm": "<b>Trích xuất dữ liệu chuẩn Form BGD & Thường (Powered by Polars & Rust):</b><br><br><b>1. File MSV:</b> Tải lên file chứa danh sách TKSV ở cột 'TKSV'.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel cần quét vét cạn.<br><br><b>Kết quả:</b> Hệ thống tự động lấy điểm, gộp dòng, và xuất file tổng hợp.",
     "Tra cứu điểm sinh viên (Cả lớp)": "<b>Tự động Scraping EHOU (Headless):</b><br><br><b>File yêu cầu:</b> Excel chuẩn bị sẵn với 2 sheet:<br><b>1. Sheet 'Login':</b> Ô A1 (Tài khoản), Ô B1 (Mật khẩu).<br><b>2. Sheet 'Data':</b> Cột 1 (Tài khoản SV), Các cột sau chứa mã môn học.",
     "Kiểm tra điều kiện đăng ký môn học (Cả lớp)": "<b>Yêu cầu file:</b> Bảng dữ liệu Excel.<br><b>Tùy chọn:</b> Có thể xác định file có chứa dòng tiêu đề hay không.<br><b>Kết quả:</b> Đánh giá điều kiện đạt (YES/NO) và phân loại trạng thái (TL/TL1).",
     "Điền KHLM (Updated) (*)": "<b>Yêu cầu file:</b> <code>Data_fill.xlsx</code><br><br><b>Sheet KHLM:</b> Cần có các cột <code>TenLop</code>, <code>MaMon</code>, <code>DiaPhuongKHL</code>, <code>DiaPhuongHL</code>.<br><b>Sheet Data:</b> Cần có các cột <code>LopLT</code>, <code>MaMon</code>, <code>MaTram</code>, <code>MSV</code>.",
@@ -1102,7 +1351,6 @@ with col_info:
         </div>
     """, unsafe_allow_html=True)
     
-    # Render các option phụ trợ tùy theo chức năng đang chọn
     keywords_str = ""
     has_header = True
     msv_file = None
@@ -1111,26 +1359,25 @@ with col_info:
         keywords_str = st.text_input("Thiết lập điều kiện (Từ khóa địa phương):", value="DNP, ĐN ( học tại HCM)")
     elif choice == "Kiểm tra điều kiện đăng ký môn học (Cả lớp)":
         has_header = st.checkbox("Tùy chọn: File chứa dòng tiêu đề (Header row)", value=True)
-    elif choice == "Gom điểm UNI":
-        msv_file = st.file_uploader("📥 Tải lên Danh sách MSV (.xlsx)", type=['xlsx', 'xls', 'xlsb', 'xlsm'])
+    elif choice in ["Gom điểm UNI", "Gom điểm"]:
+        msv_file = st.file_uploader("📥 Tải lên Danh sách Mã Cần Tra (.xlsx)", type=['xlsx', 'xls', 'xlsb', 'xlsm'])
 
     status_container = st.empty() 
 
 # --- Cột Phải: Uploader & Button Xử lý ---
 with col_action:
-    uploader_label = "Kéo thả các file Dữ liệu Nguồn vào đây" if choice == "Gom điểm UNI" else "Kéo thả các file Excel vào đây"
+    uploader_label = "Kéo thả các file Dữ liệu Nguồn vào đây" if choice in ["Gom điểm UNI", "Gom điểm"] else "Kéo thả các file Excel vào đây"
     uploaded_files = st.file_uploader(uploader_label, accept_multiple_files=True, type=['xlsx', 'xlsb', 'xls', 'xlsm'])
     
     if st.button("🚀 XỬ LÝ DỮ LIỆU"):
         if not uploaded_files:
             st.error("⚠️ Vui lòng tải dữ liệu nguồn lên trước!")
-        elif choice == "Gom điểm UNI" and not msv_file:
+        elif choice in ["Gom điểm UNI", "Gom điểm"] and not msv_file:
             st.error("⚠️ Bạn cần tải lên File Danh sách Mã Sinh Viên trước khi quét vét cạn.")
         else:
             temp_dir = tempfile.mkdtemp()
             try:
-                # Xử lý tệp đặc thù cho Gom Điểm UNI
-                if choice == "Gom điểm UNI":
+                if choice in ["Gom điểm UNI", "Gom điểm"]:
                     msv_path = os.path.join(temp_dir, "MSV_List.xlsx")
                     with open(msv_path, "wb") as f:
                         f.write(msv_file.getbuffer())
@@ -1150,6 +1397,7 @@ with col_action:
                     if choice == "Gộp File Nguồn": result_file = process_files_logic(temp_dir)
                     elif choice == "Tra cứu điểm sinh viên (Cả lớp)": result_file = scrape_ehou_logic(temp_dir, status_container)
                     elif choice == "Gom điểm UNI": result_file = gom_diem_uni_logic(msv_path, data_dir)
+                    elif choice == "Gom điểm": result_file = gom_diem_logic(msv_path, data_dir)
                     elif choice == "Kiểm tra điều kiện đăng ký môn học (Cả lớp)": result_file = check_dk_dangky_logic(temp_dir, has_header)
                     elif choice == "Điền KHLM (Updated) (*)": result_file = fill_khlm_logic(temp_dir, keywords_str)
                     elif choice == "Kiểm tra KHLM": result_file = check_khlm_logic(temp_dir)
