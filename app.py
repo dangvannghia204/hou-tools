@@ -16,53 +16,88 @@ except ImportError:
     pass
 
 # ==========================================
-# CẤU HÌNH TRANG & GIAO DIỆN (UI/UX)
+# CẤU HÌNH TRANG & CSS NÂNG CAO (UI/UX)
 # ==========================================
 st.set_page_config(page_title="Excel Data Workspace", page_icon="📊", layout="wide")
 
-# Custom CSS để giao diện mềm mại, chuyên nghiệp hơn
 st.markdown("""
     <style>
-        /* Tối ưu khoảng cách tổng thể */
-        .block-container { padding-top: 2rem; padding-bottom: 2rem; }
+        /* Tối ưu không gian hiển thị chính */
+        .block-container { 
+            padding-top: 2rem; 
+            padding-bottom: 2rem; 
+            max-width: 1000px; /* Căn giữa nội dung, không bị tràn viền quá rộng */
+        }
         
-        /* Tùy chỉnh Nút bấm xử lý */
+        /* Banner Header phong cách SaaS */
+        .app-header {
+            background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%);
+            padding: 1.5rem 2rem;
+            border-radius: 12px;
+            color: white;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+        .app-header h1 { color: white; margin: 0; font-size: 2.2rem; font-weight: 700; padding-bottom: 0.5rem;}
+        .app-header p { margin: 0; font-size: 1.1rem; opacity: 0.9; }
+
+        /* Khối Hướng dẫn (Instruction Card) */
+        .instruction-card {
+            background-color: #F8FAFC;
+            border-left: 5px solid #3B82F6;
+            padding: 1.2rem 1.5rem;
+            border-radius: 6px;
+            margin-bottom: 2rem;
+            color: #334155;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        
+        /* Tùy chỉnh Nút bấm xử lý (Màu xanh dương) */
         .stButton>button {
             width: 100%;
             border-radius: 8px;
-            height: 45px;
+            height: 50px;
+            font-size: 16px;
             font-weight: 600;
-            transition: all 0.3s ease;
+            background-color: #2563EB;
+            color: white;
+            border: none;
+            box-shadow: 0 4px 6px rgba(37, 99, 235, 0.2);
+            transition: all 0.2s ease-in-out;
+        }
+        .stButton>button:hover {
+            background-color: #1D4ED8;
+            box-shadow: 0 6px 8px rgba(37, 99, 235, 0.3);
+            transform: translateY(-2px);
         }
         
-        /* Tùy chỉnh Nút Tải xuống (Xanh lá) */
+        /* Tùy chỉnh Nút Tải xuống (Màu xanh lá) */
         .stDownloadButton>button {
             width: 100%;
             border-radius: 8px;
             height: 50px;
+            font-size: 16px;
+            font-weight: 600;
             background-color: #10B981; 
             color: white;
-            font-weight: bold;
             border: none;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 6px rgba(16, 185, 129, 0.2);
+            transition: all 0.2s ease-in-out;
+            margin-top: 1rem;
         }
         .stDownloadButton>button:hover {
             background-color: #059669;
-            color: white;
+            box-shadow: 0 6px 8px rgba(16, 185, 129, 0.3);
             transform: translateY(-2px);
         }
         
-        /* Tùy chỉnh file uploader */
-        [data-testid="stFileUploadDropzone"] {
-            border-radius: 12px;
-            border: 2px dashed #3B82F6;
-            background-color: #EFF6FF;
-        }
+        /* Ẩn bớt các viền không cần thiết của Streamlit */
+        css-1v0mbdj { margin-top: 1rem; }
     </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# CÁC HÀM TIỆN ÍCH (Giữ nguyên gốc)
+# CÁC HÀM TIỆN ÍCH
 # ==========================================
 def apply_full_border(ws):
     thin = Side(border_style="thin", color="000000")
@@ -102,7 +137,7 @@ def format_excel_date(cell):
     return v.strftime("%d/%m/%Y") if isinstance(v, datetime) else (str(v) if v else "")
 
 # ==========================================
-# CÁC HÀM LOGIC XỬ LÝ LÕI (Giữ nguyên 100% logic gốc)
+# CÁC HÀM LOGIC XỬ LÝ LÕI
 # ==========================================
 def fill_khlm_logic(folder_path, keywords_str):
     target_file = ""
@@ -505,7 +540,8 @@ def extract_class_names_logic(folder_path):
 # CẤU TRÚC MENU (SIDEBAR)
 # ==========================================
 with st.sidebar:
-    st.markdown("<h2 style='text-align: center; color: #2563EB;'>🧰 DATA WORKSPACE</h2>", unsafe_allow_html=True)
+    st.image("https://cdn-icons-png.flaticon.com/512/732/732220.png", width=60) # Icon Excel trang trí nhẹ nhàng
+    st.markdown("<h3 style='color: #1E3A8A; font-weight: 700; margin-top: -10px;'>CÔNG CỤ XỬ LÝ DỮ LIỆU</h3>", unsafe_allow_html=True)
     st.markdown("---")
     
     menu_options = {
@@ -521,51 +557,64 @@ with st.sidebar:
         "🎓 Xuất môn theo ngành học (*)": "Xuất môn theo ngành học (*)"
     }
     
-    selected_label = st.radio("📌 CHỌN CHỨC NĂNG XỬ LÝ", list(menu_options.keys()))
+    selected_label = st.radio("CHỌN CHỨC NĂNG BÊN DƯỚI", list(menu_options.keys()))
     choice = menu_options[selected_label]
     
     st.markdown("---")
-    st.caption("🚀 Version 3.0 | Web App via Streamlit")
+    st.caption("✨ Web Version 3.1 | Phát triển bởi Đặng Văn Nghĩa")
 
 # ==========================================
 # GIAO DIỆN CHÍNH (MAIN CONTENT)
 # ==========================================
-st.title(selected_label)
 
-# 1. Khối Hướng dẫn Dữ liệu (Sử dụng Expander để giấu bớt chữ, giúp UI Clean hơn)
+# 1. Header Web App (Thay thế st.title để trông gọn và xịn hơn)
+st.markdown(f"""
+    <div class="app-header">
+        <h1>{selected_label}</h1>
+        <p>Hệ thống tự động hóa xử lý và phân tích số liệu Excel Professional</p>
+    </div>
+""", unsafe_allow_html=True)
+
+# 2. Khối Hướng dẫn Dữ liệu (Dùng thẻ div Custom HTML để hiển thị dạng Card)
 instructions = {
-    "Gộp File Nguồn": "Đầu vào là file **GK300** của 1 hoặc nhiều khóa *(Mỗi sheet chứa bảng đăng ký kế hoạch học tập)*.",
-    "Điền kế hoạch lớp môn (KHLM)(*)": "- **File yêu cầu:** `Data_fill.xlsx`\n- **Sheet `KHLM`**: Cột E(Mã SV), F(SL), C(Mã môn), H(Tên lớp), I(Địa phương/Mã trạm).\n- **Sheet `data`**: Cột A(Mã lớp), C(Mã SV), K(Mã môn), L(Mã trạm).",
-    "Lọc kết quả học tập của sinh viên": "- **File yêu cầu:** `Data_Source.xlsx` và `Data.xlsb`\n- **`Data_Source.xlsx`**: Sheet 'DSSV', Cột Q (Tên lớp), Cột J (Mã SV), Cột D (Tài khoản SV).\n- **`Data.xlsb`**: File nhị phân, Cột A là 'Mã SV'.\n\n*(⚠️ Lưu ý: Tên file upload phải chính xác tuyệt đối)*",
-    "Lọc sinh viên học lại & học cải thiện": "- **File yêu cầu:** `Data_Source.xlsx` và `DanhSachDangKy.xlsx`\n- **`DanhSachDangKy.xlsx`**: Sheet 'Dangky: B,C,T' và 'Danghoc: B,G,O', Cột B (Tài khoản SV), Cột C&G (Mã môn), Cột T&O (Số TC).",
-    "Xuất Mã lớp theo GK300": "Đầu vào là file **GK300** của 1 hoặc nhiều khóa *(Mỗi sheet chứa bảng đăng ký kế hoạch học tập)*.",
-    "Xuất KHHT theo GK300 (1*)": "Đầu vào là file **GK300** của 1 hoặc nhiều khóa *(Mỗi sheet chứa bảng đăng ký kế hoạch học tập)*.",
-    "Xuất DSSV theo GK300 (2*)": "- **File yêu cầu:** `Merged_GK300.xlsx` tạo từ (1*) và `Data_Source.xlsx`\n- **`Merged_GK300.xlsx`**: Sheet 'KHHT_GK300', Cột L (12) là 'Mã LT'.",
-    "Xuất KHHTCT theo GK300 (3*)": "- **File yêu cầu:** `Merged_GK300.xlsx`.",
-    "Thống kê số lượng theo lớp/nhóm lớp & môn (*)": "- **File yêu cầu:** `Data_SLLM.xlsx`\n- **Sheet 'Data'**: Cột L (Mã trạm).\n- **Sheet 'ThongKe'**: Cột A (Tên lớp), Cột B (Mã môn), Tiêu đề Cột C (Mã Trạm).",
-    "Xuất môn theo ngành học (*)": "Đầu vào là file theo ngành theo khóa *(Mỗi sheet chứa bảng đăng ký kế hoạch học tập)*."
+    "Gộp File Nguồn": "Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa (Mỗi sheet chứa bảng đăng ký kế hoạch học tập).",
+    "Điền kế hoạch lớp môn (KHLM)(*)": "<b>Yêu cầu:</b> File <code>Data_fill.xlsx</code><br><br><b>Sheet KHLM:</b> Cột E(Mã SV), F(SL), C(Mã môn), H(Tên lớp), I(Địa phương/Mã trạm).<br><b>Sheet data:</b> Cột A(Mã lớp), C(Mã SV), K(Mã môn), L(Mã trạm).",
+    "Lọc kết quả học tập của sinh viên": "<b>Yêu cầu:</b> <code>Data_Source.xlsx</code> và <code>Data.xlsb</code><br><br><b>Data_Source.xlsx:</b> Sheet 'DSSV', Cột Q (Tên lớp), Cột J (Mã SV), Cột D (Tài khoản SV).<br><b>Data.xlsb:</b> File nhị phân, Cột A là 'Mã SV'.",
+    "Lọc sinh viên học lại & học cải thiện": "<b>Yêu cầu:</b> <code>Data_Source.xlsx</code> và <code>DanhSachDangKy.xlsx</code><br><br><b>DanhSachDangKy.xlsx:</b> Sheet 'Dangky: B,C,T' và 'Danghoc: B,G,O', Cột B (Tài khoản SV), Cột C&G (Mã môn), Cột T&O (Số TC).",
+    "Xuất Mã lớp theo GK300": "Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa (Mỗi sheet chứa bảng đăng ký kế hoạch học tập).",
+    "Xuất KHHT theo GK300 (1*)": "Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa (Mỗi sheet chứa bảng đăng ký kế hoạch học tập).",
+    "Xuất DSSV theo GK300 (2*)": "<b>Yêu cầu:</b> <code>Merged_GK300.xlsx</code> tạo từ (1*) và <code>Data_Source.xlsx</code><br><br><b>Merged_GK300.xlsx:</b> Sheet 'KHHT_GK300', Cột L (12) là 'Mã LT'.",
+    "Xuất KHHTCT theo GK300 (3*)": "<b>Yêu cầu:</b> Cần cung cấp file <code>Merged_GK300.xlsx</code>.",
+    "Thống kê số lượng theo lớp/nhóm lớp & môn (*)": "<b>Yêu cầu:</b> File <code>Data_SLLM.xlsx</code><br><br><b>Sheet Data:</b> Cột L (Mã trạm).<br><b>Sheet ThongKe:</b> Cột A (Tên lớp), Cột B (Mã môn), Tiêu đề Cột C (Mã Trạm).",
+    "Xuất môn theo ngành học (*)": "Đầu vào là file dữ liệu môn học phân bổ theo ngành và theo khóa (Mỗi sheet chứa bảng đăng ký kế hoạch học tập)."
 }
 
-with st.expander("📖 Bấm vào đây để xem Hướng dẫn & Yêu cầu dữ liệu đầu vào", expanded=True):
-    st.markdown(instructions.get(choice, "Vui lòng upload các file Excel theo đúng cấu trúc hệ thống yêu cầu."))
+st.markdown(f"""
+    <div class="instruction-card">
+        <strong>📌 Hướng dẫn chuẩn bị dữ liệu:</strong><br><br>
+        {instructions.get(choice, "Vui lòng upload các file Excel theo đúng định dạng.")}
+    </div>
+""", unsafe_allow_html=True)
 
-# Cấu hình phụ cho chức năng Điền KHLM
+# 3. Input Cấu hình Phụ (Chỉ hiện khi chọn chức năng Điền KHLM)
 keywords_str = ""
 if choice == "Điền kế hoạch lớp môn (KHLM)(*)":
-    st.markdown("##### ⚙️ Thiết lập điều kiện loại trùng")
+    st.markdown("##### ⚙️ Thiết lập điều kiện lọc nâng cao")
     keywords_str = st.text_input("Nhập các từ khóa địa phương (cách nhau bằng dấu phẩy):", value="DNP, HCM(Oanh)")
-    st.caption("Ví dụ: DNP, HCM(Oanh), BP, SG")
+    st.caption("Gợi ý: DNP, HCM(Oanh), BP, SG...")
+    st.write("") # Dòng trống tạo khoảng cách
 
-st.markdown("---")
+# 4. Khu vực Upload và Thực thi (Sắp xếp cột gọn gàng)
+col_space_left, col_main, col_space_right = st.columns([1, 8, 1])
 
-# 2. Khối Upload & Xử lý (Center Alignment)
-col1, col2, col3 = st.columns([1, 2, 1])
-with col2:
-    uploaded_files = st.file_uploader("📥 Kéo thả file Excel vào đây", accept_multiple_files=True, type=['xlsx', 'xlsb'])
+with col_main:
+    uploaded_files = st.file_uploader("Kéo thả các file Excel vào khu vực này", accept_multiple_files=True, type=['xlsx', 'xlsb'])
+    
+    st.write("") # Khoảng trống trước nút bấm
     
     if st.button("🚀 BẮT ĐẦU XỬ LÝ DỮ LIỆU"):
         if not uploaded_files:
-            st.warning("⚠️ Bạn chưa tải lên file dữ liệu nào. Vui lòng kiểm tra lại!")
+            st.error("⚠️ Hệ thống chưa nhận được file. Vui lòng tải dữ liệu lên trước khi chạy!")
         else:
             temp_dir = tempfile.mkdtemp()
             try:
@@ -574,7 +623,7 @@ with col2:
                     with open(file_path, "wb") as f:
                         f.write(uploaded_file.getbuffer())
                 
-                with st.spinner('⏳ Đang xử lý dữ liệu... Vui lòng không đóng trang!'):
+                with st.spinner('⚙️ Đang phân tích và xử lý dữ liệu...'):
                     result_file = None
                     
                     if choice == "Gộp File Nguồn": result_file = process_files_logic(temp_dir)
@@ -589,14 +638,12 @@ with col2:
                     elif choice == "Xuất môn theo ngành học (*)": result_file = extract_courses_logic(temp_dir)
 
                     if result_file and os.path.exists(result_file):
-                        st.toast('Xử lý thành công!', icon='✅')
                         st.balloons()
-                        st.success("🎉 Mọi thứ đã hoàn tất. File của bạn đã sẵn sàng!")
+                        st.success("✅ Quá trình xử lý đã hoàn tất. File kết quả của bạn đã sẵn sàng!")
                         
                         with open(result_file, "rb") as f:
                             file_data = f.read()
                         
-                        # Nút Download nổi bật
                         st.download_button(
                             label="⬇️ TẢI XUỐNG FILE KẾT QUẢ",
                             data=file_data,
@@ -604,11 +651,11 @@ with col2:
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
                     else:
-                        st.error("❌ Không thể tạo file kết quả. Vui lòng kiểm tra lại cấu trúc dữ liệu đầu vào.")
+                        st.error("❌ Xử lý thất bại. Vui lòng kiểm tra lại tính hợp lệ của dữ liệu đầu vào.")
                         
             except Exception as e:
-                st.error(f"❌ Phát hiện lỗi trong luồng xử lý:\n\n`{str(e)}`")
-                st.info("💡 Mẹo: Hãy mở mục 'Hướng dẫn' phía trên để chắc chắn bạn đã đổi tên file đúng như yêu cầu.")
+                st.error(f"❌ Phát hiện lỗi hệ thống: `{str(e)}`")
+                st.info("💡 Lời khuyên: Hãy kiểm tra lại tên file và đối chiếu với Hướng dẫn chuẩn bị dữ liệu bên trên.")
             
             finally:
                 shutil.rmtree(temp_dir)
