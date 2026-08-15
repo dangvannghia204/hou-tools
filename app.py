@@ -5,6 +5,8 @@ import re
 from datetime import datetime
 from copy import copy
 import pandas as pd
+import numpy as np
+import openpyxl
 from openpyxl import load_workbook, Workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill, Alignment, Font, Border, Side
@@ -135,96 +137,241 @@ def format_excel_date(cell):
     return v.strftime("%d/%m/%Y") if isinstance(v, datetime) else (str(v) if v else "")
 
 # ==========================================
-# CÁC HÀM LOGIC XỬ LÝ LÕI
+# [CLASS MỚI] BỘ XỬ LÝ KHLM (TỪ SOURCE 2)
 # ==========================================
+class ExcelDataProcessor:
+    def __init__(self, input_file="Data_fill.xlsx", keywords_str="DNP, HCM", log_callback=print):
+        self.input_file = input_file
+        self.keywords_str = keywords_str
+        self.log = log_callback
+        self.base_dir = os.path.dirname(os.path.abspath(input_file)) if os.path.dirname(input_file) else os.getcwd()
+
+    def run_all_steps(self):
+        self.log("BẮT ĐẦU QUÁ TRÌNH XỬ LÝ DỮ LIỆU...")
+        if not os.path.exists(self.input_file): return False
+        self._preprocess_khlm()
+
+        out_khl = os.path.join(self.base_dir, "Ketqua_KHLM.xlsx")
+        self._run_source_1(is_hoc_lai=False, output_path=out_khl)
+
+        out_hl = os.path.join(self.base_dir, "Ketquahoclai_KHLM.xlsx")
+        self._run_source_1(is_hoc_lai=True, output_path=out_hl)
+
+        out_merge = os.path.join(self.base_dir, "Data_Merge.xlsx")
+        self._merge_results(out_khl, out_hl, out_merge)
+
+        out_lopmon = os.path.join(self.base_dir, "LopMon_Ketqua.xlsx")
+        self._run_source_2_and_map(out_merge, out_lopmon)
+        return True
+
+    def _preprocess_khlm(self):
+        wb = openpyxl.load_workbook(self.input_file)
+        actual_khlm = next((s for s in wb.sheetnames if s.lower() == 'khlm'), None)
+        if not actual_khlm: return
+
+        df_khlm = pd.read_excel(self.input_file, sheet_name=actual_khlm)
+        cols = df_khlm.columns.tolist()
+        col_map = {str(c).strip().upper(): c for c in cols}
+        keywords = [k.strip().upper() for k in self.keywords_str.split(',') if k.strip()]
+
+        for index, row in df_khlm.iterrows():
+            ten_lop = str(row.get('TenLop', '')).upper()
+            dia_phuong = str(row.get('DiaPhuong', ''))
+            dia_phuong_upper = dia_phuong.upper()
+
+            if 'HL' in ten_lop or 'HL' in dia_phuong_upper or 'HỌC LẠI' in dia_phuong_upper:
+                df_khlm.at[index, 'DiaPhuongHL'] = 'HL'
+
+            current_dp_khl = str(row.get('DiaPhuongKHL', ''))
+            if current_dp_khl.lower() == 'nan': current_dp_khl = ''
+            
+            added_codes = []
+            for kw in keywords:
+                if kw in dia_phuong_upper:
+                    if kw in col_map: 
+                        original_col_name = col_map[kw]
+                        val = row[original_col_name]
+                        if pd.notna(val) and isinstance(val, (int, float)) and val > 0:
+                            added_codes.append(kw)
+            
+            if added_codes:
+                str_to_add = ",".join(added_codes)
+                if current_dp_khl.strip(): df_khlm.at[index, 'DiaPhuongKHL'] = f"{current_dp_khl},{str_to_add}"
+                else: df_khlm.at[index, 'DiaPhuongKHL'] = str_to_add
+
+        with pd.ExcelWriter(self.input_file, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+             df_khlm.to_excel(writer, sheet_name=actual_khlm, index=False)
+
+    def _get_col_idx(self, df, col_name, default_name):
+        if col_name in df.columns: return df.columns.get_loc(col_name)
+        else: return -1
+
+    def _run_source_1(self, is_hoc_lai, output_path):
+        xls = pd.ExcelFile(self.input_file)
+        actual_khlm = next((s for s in xls.sheet_names if s.lower() == 'khlm'), None)
+        actual_data = next((s for s in xls.sheet_names if s.lower() == 'data'), None)
+        if not actual_khlm or not actual_data: return
+
+        khlm = pd.read_excel(self.input_file, sheet_name=actual_khlm, header=0)
+        data = pd.read_excel(self.input_file, sheet_name=actual_data)
+
+        idx_tenlop = self._get_col_idx(khlm, 'TenLop', 'TenLop')
+        idx_mamon_khlm = self._get_col_idx(khlm, 'MaMon', 'MaMon')
+        idx_dp_khl = self._get_col_idx(khlm, 'DiaPhuongKHL', 'DiaPhuongKHL')
+        idx_dp_hl = self._get_col_idx(khlm, 'DiaPhuongHL', 'DiaPhuongHL')
+
+        idx_loplt_data = self._get_col_idx(data, 'LopLT', 'LopLT')
+        idx_mamon_data = self._get_col_idx(data, 'MaMon', 'MaMon')
+        idx_matram_data = self._get_col_idx(data, 'MaTram', 'MaTram')
+        idx_msv_data = self._get_col_idx(data, 'MSV', 'MSV')
+
+        assigned = {}
+        total_rows = len(khlm)
+        filter_keywords = [k.strip().upper() for k in self.keywords_str.split(',') if k.strip()]
+        n = idx_dp_hl if is_hoc_lai else idx_dp_khl
+
+        for i in range(total_rows):
+            row = khlm.iloc[i]
+            kc, kh, kj = str(row.iloc[idx_mamon_khlm]).strip().upper(), str(row.iloc[idx_tenlop]).strip().upper(), str(row.iloc[n]).strip().upper()
+            if kc == 'NAN' or not kc or kc == "": continue
+
+            kc_parts = [p.strip() for p in kc.split('/') if p.strip()]
+            mask_mamon = data.iloc[:, idx_mamon_data].astype(str).str.upper().apply(lambda x: any((x.strip() in p) or (p in x.strip()) for p in kc_parts))
+            mask_matram = data.iloc[:, idx_matram_data].astype(str).str.upper().apply(lambda x: (x.strip() in kj) or (kj in x.strip()))
+
+            if not is_hoc_lai:
+                mask_loplt = data.iloc[:, idx_loplt_data].astype(str).str.upper().apply(lambda x: (x.strip() in kh) or (kh in x.strip()))
+                mask = mask_mamon & mask_loplt & mask_matram
+            else:
+                mask = mask_mamon & mask_matram
+
+            msv_col_name = data.columns[idx_msv_data]
+            matched_msvs = data.loc[mask, msv_col_name].unique().tolist()
+
+            if any(kw in kj for kw in filter_keywords):
+                if kc not in assigned: assigned[kc] = set()
+                final_msvs = [m for m in matched_msvs if m not in assigned[kc]]
+                assigned[kc].update(final_msvs)
+                matched_msvs = final_msvs
+
+            khlm.iloc[i, 4] = ", ".join(map(str, matched_msvs))
+            khlm.iloc[i, 5] = len(matched_msvs)
+
+        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+            khlm.to_excel(writer, sheet_name='Result', index=False)
+
+    def _merge_results(self, file_khl, file_hl, file_merge_out):
+        xls1, xls2 = pd.ExcelFile(file_khl), pd.ExcelFile(file_hl)
+        actual_res1 = next((s for s in xls1.sheet_names if s.lower() == 'result'), None)
+        actual_res2 = next((s for s in xls2.sheet_names if s.lower() == 'result'), None)
+        if not actual_res1 or not actual_res2: return
+
+        df1 = pd.read_excel(file_khl, sheet_name=actual_res1, usecols=[0, 1, 2, 3, 4])
+        df2 = pd.read_excel(file_hl, sheet_name=actual_res2, usecols=[0, 1, 2, 3, 4])
+
+        df1_valid = df1[df1[df1.columns[4]].astype(str).str.strip().replace('nan', '') != '']
+        df2_valid = df2[df2[df2.columns[4]].astype(str).str.strip().replace('nan', '') != '']
+        df_merged = pd.concat([df1_valid, df2_valid], ignore_index=True)
+        df_merged.to_excel(file_merge_out, sheet_name='data', index=False)
+
+    def _run_source_2_and_map(self, file_merge_in, file_lopmon_out):
+        wb = openpyxl.load_workbook(file_merge_in)
+        data_sheet_name = next((s for s in wb.sheetnames if s.lower() == 'data'), None)
+        if not data_sheet_name: return
+        ws_data = wb[data_sheet_name]
+        
+        actual_res = next((s for s in wb.sheetnames if s.lower() == 'result'), None)
+        if actual_res: del wb[actual_res]
+        ws_result = wb.create_sheet('Result')
+        ws_result.append(["Cột A", "Cột B", "Cột C", "Cột D", "Cột E", "Cột F", "Cột G", "Cột H"])
+
+        result_data_for_mapping = {}
+        for row in range(2, ws_data.max_row + 1):
+            val_a, val_b, val_c, val_d, val_e = ws_data.cell(row=row, column=1).value, ws_data.cell(row=row, column=2).value, ws_data.cell(row=row, column=3).value, ws_data.cell(row=row, column=4).value, ws_data.cell(row=row, column=5).value
+            if val_a is None and val_b is None and val_e is None: continue
+
+            if val_e is not None:
+                for item in str(val_e).split(','):
+                    clean_item = item.strip()
+                    if clean_item:
+                        col_g, col_h = str(clean_item) + str(val_c if val_c is not None else ""), val_a
+                        ws_result.append([clean_item, val_a, val_b, val_c, val_d, "", col_g, col_h])
+                        result_data_for_mapping[col_g] = col_h
+                        if val_c and '/' in str(val_c):
+                            for part in str(val_c).split('/'):
+                                if part.strip(): result_data_for_mapping[str(clean_item) + part.strip()] = col_h
+            else:
+                 col_g, col_h = "" + str(val_c if val_c is not None else ""), val_a
+                 ws_result.append(["", val_a, val_b, val_c, val_d, "", col_g, col_h])
+                 result_data_for_mapping[col_g] = col_h
+                 if val_c and '/' in str(val_c):
+                     for part in str(val_c).split('/'):
+                         if part.strip(): result_data_for_mapping["" + part.strip()] = col_h
+
+        wb.save(file_lopmon_out)
+        wb_fill = openpyxl.load_workbook(self.input_file)
+        actual_fill_data = next((s for s in wb_fill.sheetnames if s.lower() == 'data'), None)
+        if not actual_fill_data: return
+        
+        ws_fill_data = wb_fill[actual_fill_data]
+        col_idx_msv, col_idx_mamon, col_idx_macoursett = -1, -1, -1
+
+        for cell in ws_fill_data[1]:
+            val = str(cell.value).strip().upper() if cell.value else ""
+            if val == 'MSV': col_idx_msv = cell.column
+            elif val == 'MAMON': col_idx_mamon = cell.column
+            elif val == 'MACOURSETT': col_idx_macoursett = cell.column
+
+        if col_idx_msv == -1 or col_idx_mamon == -1: return
+        if col_idx_macoursett == -1:
+            col_idx_macoursett = ws_fill_data.max_column + 1
+            ws_fill_data.cell(row=1, column=col_idx_macoursett, value="MaCourseTT")
+
+        for row in range(2, ws_fill_data.max_row + 1):
+            msv, mamon = str(ws_fill_data.cell(row=row, column=col_idx_msv).value or "").strip(), str(ws_fill_data.cell(row=row, column=col_idx_mamon).value or "").strip()
+            lookup_key = msv + mamon 
+            if lookup_key in result_data_for_mapping: ws_fill_data.cell(row=row, column=col_idx_macoursett, value=result_data_for_mapping[lookup_key])
+            elif '/' in mamon:
+                for part in mamon.split('/'):
+                    alt_key = msv + part.strip()
+                    if alt_key in result_data_for_mapping:
+                        ws_fill_data.cell(row=row, column=col_idx_macoursett, value=result_data_for_mapping[alt_key])
+                        break
+        
+        final_output = os.path.join(self.base_dir, "Data_fill_Finish.xlsx")
+        wb_fill.save(final_output)
+
+# ==========================================
+# CÁC HÀM LOGIC XỬ LÝ LÕI KHÁC (GIỮ NGUYÊN)
+# ==========================================
+
+# Cập nhật logic Hàm Điền KHLM (Gọi Class ExcelDataProcessor)
 def fill_khlm_logic(folder_path, keywords_str):
     target_file = ""
     for f in os.listdir(folder_path):
         if f.endswith(".xlsx") and not f.startswith("~$"):
             try:
                 temp_wb = load_workbook(os.path.join(folder_path, f), read_only=True)
-                if "KHLM" in temp_wb.sheetnames and "data" in temp_wb.sheetnames:
+                sheet_names = [s.lower() for s in temp_wb.sheetnames]
+                if "khlm" in sheet_names and "data" in sheet_names:
                     target_file = os.path.join(folder_path, f)
                     break
             except: continue
+            
     if not target_file: raise ValueError("Không tìm thấy file Excel nào chứa đủ 2 sheet 'KHLM' và 'data'!")
 
-    filter_keywords = [k.strip().upper() for k in keywords_str.split(',') if k.strip()]
-    khlm = pd.read_excel(target_file, sheet_name='KHLM', header=0)
-    data = pd.read_excel(target_file, sheet_name='data')
-    assigned = {}
-    total_rows = len(khlm)
+    # Khởi tạo class mới, truyền log rỗng để không spam console
+    processor = ExcelDataProcessor(input_file=target_file, keywords_str=keywords_str, log_callback=lambda msg: None)
+    success = processor.run_all_steps()
     
-    for i in range(total_rows):
-        row = khlm.iloc[i]
-        kc = str(row.iloc[2]).strip().upper() 
-        ki = str(row.iloc[8]).strip().upper() 
-        if kc == 'NAN' or not kc or kc == "": continue
+    if not success:
+        raise ValueError("Phát hiện lỗi trong thuật toán xử lý KHLM.")
         
-        mask = (data.iloc[:, 10].astype(str).str.upper().apply(lambda x: (x in kc) or (kc in x))) & \
-               (data.iloc[:, 11].astype(str).str.upper().apply(lambda x: (x in ki) or (ki in x)))
-        msv_col_name = data.columns[2]
-        matched_msvs = data.loc[mask, msv_col_name].unique().tolist()
+    final_file = os.path.join(folder_path, "Data_fill_Finish.xlsx")
+    if not os.path.exists(final_file):
+        raise ValueError("Không thể trích xuất được file kết quả Data_fill_Finish.xlsx")
         
-        if any(kw in ki for kw in filter_keywords):
-            if kc not in assigned: assigned[kc] = set()
-            final_msvs = [m for m in matched_msvs if m not in assigned[kc]]
-            assigned[kc].update(final_msvs)
-            matched_msvs = final_msvs
-        
-        khlm.iloc[i, 4] = ", ".join(map(str, matched_msvs)) 
-        khlm.iloc[i, 5] = len(matched_msvs) 
-
-    col_k_data = data.iloc[:, 10].astype(str).str.strip().str.upper()
-    mapping_ab = col_k_data.value_counts().reset_index(); mapping_ab.columns = ['A', 'B']; mapping_ab = mapping_ab.sort_values(by='A')
-    khlm.iloc[:, 5] = pd.to_numeric(khlm.iloc[:, 5], errors='coerce').fillna(0)
-    df_cd = khlm.iloc[:, [2, 5]].copy(); df_cd.columns = ['C', 'D']; df_cd['C'] = df_cd['C'].astype(str).str.strip().str.upper()
-    df_cd = df_cd[(df_cd['C'] != 'NAN') & (df_cd['D'] > 0)].sort_values(by='C')
-    mapping_ef = df_cd.groupby('C')['D'].sum().reset_index(); mapping_ef.columns = ['E', 'F']; mapping_ef = mapping_ef.sort_values(by='E')
-
-    max_len = max(len(mapping_ab), len(df_cd), len(mapping_ef), len(khlm))
-    mapping_final = pd.DataFrame(index=range(max_len))
-    mapping_final['Mã môn (Data)'] = pd.Series(mapping_ab['A'].values)
-    mapping_final['SL mã (Data)'] = pd.Series(mapping_ab['B'].values)
-    mapping_final['Mã môn (Result)'] = pd.Series(df_cd['C'].values)
-    mapping_final['SL dòng (Result)'] = pd.Series(df_cd['D'].values)
-    mapping_final['Mã duy nhất (E)'] = pd.Series(mapping_ef['E'].values)
-    mapping_final['Tổng thống kê (F)'] = pd.Series(mapping_ef['F'].values)
-    
-    def check_g(row):
-        a, b, e, f = row['Mã môn (Data)'], row['SL mã (Data)'], row['Mã duy nhất (E)'], row['Tổng thống kê (F)']
-        return "YES" if (pd.notna(a) and pd.notna(e) and str(a)==str(e) and b==f) else "NO"
-    mapping_final['Kiểm tra (G)'] = mapping_final.apply(check_g, axis=1)
-    mapping_final[' '] = pd.Series([None] * max_len)
-    mapping_final['MÃ COURSE'] = pd.Series(khlm.iloc[:, 0].values)
-    mapping_final['MÃ SV'] = pd.Series(khlm.iloc[:, 4].values)
-
-    output_path = os.path.join(folder_path, 'Ket_Qua_KHLM_Mapping_Integrated.xlsx')
-    with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-        khlm.to_excel(writer, sheet_name='Result', index=False)
-        data.to_excel(writer, sheet_name='data', index=False)
-        mapping_final.to_excel(writer, sheet_name='Mapping', index=False)
-        
-        ws_res = writer.sheets['Result']
-        for r in range(2, ws_res.max_row + 1):
-            if ws_res.cell(row=r, column=6).value in [None, 0]: ws_res.row_dimensions[r].hidden = True
-
-        ws_map = writer.sheets['Mapping']
-        fill_ae = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
-        fill_bf = PatternFill(start_color="FDE9D9", end_color="FDE9D9", fill_type="solid")
-        fill_green = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-        border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-        
-        for r_idx, row in enumerate(ws_map.iter_rows(min_row=1, max_row=max_len+1, min_col=1, max_col=10)):
-            for cell in row:
-                cell.border = border; cell.alignment = Alignment(horizontal='center')
-                if r_idx == 0: cell.font = Font(bold=True); continue
-                col = cell.column_letter
-                if col in ['A', 'E']: cell.fill = fill_ae
-                elif col in ['B', 'F']: cell.fill = fill_bf
-                if col == 'G' and cell.value == "YES": cell.fill = fill_green
-                if col in ['I', 'J'] and ws_map.cell(row=cell.row, column=10).value: cell.fill = fill_green
-    return output_path
+    return final_file
 
 def extract_courses_logic(folder_path):
     files = [f for f in os.listdir(folder_path) if f.endswith('.xlsx') and not f.startswith('~$') and f != "Courses_List.xlsx"]
@@ -453,7 +600,7 @@ def extract_class_names_logic(folder_path):
     return op
 
 # ==========================================
-# MENU SIDEBAR (Thu gọn khoảng cách)
+# MENU SIDEBAR (Cập nhật tiêu đề Điền KHLM)
 # ==========================================
 with st.sidebar:
     st.markdown("<h3 style='color: #1E3A8A; font-weight: 700; margin-top: -15px;'>DATA WORKSPACE</h3>", unsafe_allow_html=True)
@@ -461,7 +608,7 @@ with st.sidebar:
     
     menu_options = {
         "Gộp File Nguồn": "Gộp File Nguồn",
-        "Điền KHLM (*)": "Điền kế hoạch lớp môn (KHLM)(*)",
+        "Điền KHLM (Mới cập nhật)": "Điền kế hoạch lớp môn (KHLM) - Cập nhật",
         "Lọc KQHT Sinh viên": "Lọc kết quả học tập của sinh viên",
         "Lọc SV Học lại/Cải thiện": "Lọc sinh viên học lại & học cải thiện",
         "Xuất Mã lớp (GK300)": "Xuất Mã lớp theo GK300",
@@ -476,24 +623,24 @@ with st.sidebar:
     choice = menu_options[selected_label]
     
     st.markdown("---")
-    st.caption("Ver 4.0 | Compact UI Edition")
+    st.caption("Ver 5.0 | Advanced Logic Engine")
 
 # ==========================================
 # GIAO DIỆN CHÍNH (SINGLE-SCREEN GRID LAYOUT)
 # ==========================================
 
-# 1. Header Web App (Ngắn gọn)
+# 1. Header Web App
 st.markdown(f"""
     <div class="app-header">
         <h2>{choice}</h2>
-        <p>Thực thi tự động tác vụ Excel một cách nhanh chóng và chính xác.</p>
+        <p>Hệ thống tự động thực thi tác vụ Excel một cách nhanh chóng và chính xác.</p>
     </div>
 """, unsafe_allow_html=True)
 
 # Khai báo từ điển hướng dẫn
 instructions = {
     "Gộp File Nguồn": "Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa (Mỗi sheet chứa bảng đăng ký).",
-    "Điền kế hoạch lớp môn (KHLM)(*)": "<b>Yêu cầu file:</b> <code>Data_fill.xlsx</code><br><br><b>Sheet KHLM:</b> Cột E(Mã SV), F(SL), C(Mã môn), H(Tên lớp), I(Trạm).<br><b>Sheet data:</b> Cột A(Mã lớp), C(Mã SV), K(Mã môn), L(Trạm).",
+    "Điền kế hoạch lớp môn (KHLM) - Cập nhật": "<b>Yêu cầu file:</b> <code>Data_fill.xlsx</code><br><br><b>Sheet KHLM:</b> Có các cột <code>TenLop</code>, <code>MaMon</code>, <code>DiaPhuong</code>.<br><b>Sheet Data:</b> Có các cột <code>LopLT</code>, <code>MaMon</code>, <code>MaTram</code>, <code>MSV</code>.",
     "Lọc kết quả học tập của sinh viên": "<b>Yêu cầu:</b> <code>Data_Source.xlsx</code> & <code>Data.xlsb</code><br><br><b>Data_Source.xlsx:</b> Sheet 'DSSV', Cột Q (Lớp), Cột J (Mã SV), Cột D (TK SV).<br><b>Data.xlsb:</b> File nhị phân, Cột A (Mã SV).",
     "Lọc sinh viên học lại & học cải thiện": "<b>Yêu cầu:</b> <code>Data_Source.xlsx</code> & <code>DanhSachDangKy.xlsx</code><br><br><b>DanhSachDangKy.xlsx:</b> Sheet 'Dangky: B,C,T' và 'Danghoc: B,G,O', Cột B (TK SV), Cột C&G (Mã môn), Cột T&O (Số TC).",
     "Xuất Mã lớp theo GK300": "Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa.",
@@ -517,8 +664,9 @@ with col_info:
     """, unsafe_allow_html=True)
     
     keywords_str = ""
-    if choice == "Điền kế hoạch lớp môn (KHLM)(*)":
-        keywords_str = st.text_input("Thiết lập điều kiện (Từ khóa địa phương):", value="DNP, HCM(Oanh)")
+    if choice == "Điền kế hoạch lớp môn (KHLM) - Cập nhật":
+        keywords_str = st.text_input("Mã địa phương (ngăn cách bởi dấu phẩy):", value="DNP, ĐN ( học tại HCM)")
+        st.caption("Ví dụ: DNP, ĐN ( học tại HCM), BP, SG...")
 
 # --- Cột Phải: Uploader & Button Xử lý ---
 with col_action:
@@ -530,14 +678,15 @@ with col_action:
         else:
             temp_dir = tempfile.mkdtemp()
             try:
+                # Lưu file được upload vào temp_dir
                 for uploaded_file in uploaded_files:
                     with open(os.path.join(temp_dir, uploaded_file.name), "wb") as f:
                         f.write(uploaded_file.getbuffer())
                 
-                with st.spinner('⚙️ Đang xử lý...'):
+                with st.spinner('⚙️ Đang xử lý thuật toán...'):
                     result_file = None
                     if choice == "Gộp File Nguồn": result_file = process_files_logic(temp_dir)
-                    elif choice == "Điền kế hoạch lớp môn (KHLM)(*)": result_file = fill_khlm_logic(temp_dir, keywords_str)
+                    elif choice == "Điền kế hoạch lớp môn (KHLM) - Cập nhật": result_file = fill_khlm_logic(temp_dir, keywords_str)
                     elif choice == "Lọc kết quả học tập của sinh viên": result_file = compare_data_logic(temp_dir)
                     elif choice == "Lọc sinh viên học lại & học cải thiện": result_file = filter_sv_logic(temp_dir)
                     elif choice == "Xuất Mã lớp theo GK300": result_file = extract_class_names_logic(temp_dir)
@@ -564,4 +713,5 @@ with col_action:
             except Exception as e:
                 st.error(f"❌ Lỗi hệ thống: `{str(e)}`")
             finally:
+                # Dọn dẹp bộ nhớ tạm
                 shutil.rmtree(temp_dir)
