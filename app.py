@@ -27,7 +27,7 @@ st.markdown("""
         .block-container { 
             padding-top: 1rem !important; 
             padding-bottom: 0rem !important; 
-            max-width: 1200px;
+            max-width: 1250px;
         }
         .app-header {
             background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%);
@@ -90,7 +90,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# CLASS XỬ LÝ LÕI MỚI CHO CHỨC NĂNG KHLM
+# CLASS XỬ LÝ LÕI KHLM (Updated)
 # ==========================================
 class ExcelDataProcessor:
     def __init__(self, input_file="Data_fill.xlsx", keywords_str="DNP, HCM", log_callback=print):
@@ -366,6 +366,95 @@ def format_excel_date(cell):
 # ==========================================
 # CÁC HÀM LOGIC XỬ LÝ (Streamlit Wrapper)
 # ==========================================
+
+# 1. Bổ sung hàm Kiểm tra KHLM mới
+def check_khlm_logic(folder_path):
+    file_path = os.path.join(folder_path, "Data_SLLM.xlsx")
+    if not os.path.exists(file_path): 
+        raise ValueError("Không tìm thấy tệp Data_SLLM.xlsx!")
+    
+    output_path = os.path.join(folder_path, "Data_SLLM_Finish.xlsx")
+    
+    try:
+        df_data = pd.read_excel(file_path, sheet_name='Data', usecols="D,H")
+    except ValueError:
+        raise Exception("Không tìm thấy Sheet 'Data' hoặc thiếu cột D, H.")
+    
+    df_data.columns = ['Lop', 'MaMon']
+    df_data = df_data.dropna(subset=['MaMon'])
+    df_data['Lop'] = df_data['Lop'].astype(str).str.strip()
+    df_data['MaMon'] = df_data['MaMon'].astype(str).str.strip()
+    
+    grouped_data = df_data.groupby('MaMon')['Lop'].apply(lambda x: ', '.join(sorted(set(x)))).reset_index()
+    list_b_mamon_data = grouped_data['MaMon'].tolist()
+    list_a_lop_data = grouped_data['Lop'].tolist()
+
+    try:
+        df_tk = pd.read_excel(file_path, sheet_name='ThongKe', usecols="A,B")
+    except ValueError:
+        raise Exception("Không tìm thấy Sheet 'ThongKe' hoặc thiếu cột A, B.")
+    
+    df_tk.columns = ['TenLop', 'MaMon']
+    df_tk = df_tk.dropna(subset=['MaMon'])
+    df_tk['TenLop'] = df_tk['TenLop'].astype(str).str.strip()
+    df_tk['MaMon'] = df_tk['MaMon'].astype(str).str.strip()
+
+    grouped_tk = df_tk.groupby('MaMon')['TenLop'].apply(lambda x: ', '.join(sorted(set(x)))).reset_index()
+    list_e_mamon_tk = grouped_tk['MaMon'].tolist()
+    list_d_lop_tk = grouped_tk['TenLop'].tolist()
+
+    list_g_lop_thieu = []
+    list_h_mamon_thieu = []
+    list_i_mamon_tuong_ung = []
+    dict_tk = dict(zip(list_e_mamon_tk, list_d_lop_tk))
+
+    for i, ma_mon_data in enumerate(list_b_mamon_data):
+        classes_in_data = [c.strip() for c in list_a_lop_data[i].split(',')]
+        if ma_mon_data not in dict_tk:
+            list_h_mamon_thieu.append(ma_mon_data)
+            for cls in classes_in_data:
+                list_g_lop_thieu.append(cls)
+                list_i_mamon_tuong_ung.append(ma_mon_data)
+        else:
+            classes_in_tk = [c.strip() for c in dict_tk[ma_mon_data].split(',')]
+            for cls in classes_in_data:
+                if cls not in classes_in_tk:
+                    list_g_lop_thieu.append(cls)
+                    list_i_mamon_tuong_ung.append(ma_mon_data)
+
+    result_df = pd.DataFrame({
+        'Cột A (Lớp_D)': pd.Series(list_a_lop_data),
+        'Cột B (Mã môn_D)': pd.Series(list_b_mamon_data),
+        'Cột C (Trống)': pd.Series([], dtype=str),
+        'Cột D (Lớp_TK)': pd.Series(list_d_lop_tk),
+        'Cột E (Mã môn_TK)': pd.Series(list_e_mamon_tk),
+        'Cột F (Trống)': pd.Series([], dtype=str),
+        'Cột G (Lớp_D thiếu trong Lớp_TK)': pd.Series(list_g_lop_thieu),
+        'Cột H (Mã môn_D thiếu trong Mã môn_TK)': pd.Series(list_h_mamon_thieu),
+        'Cột I (Mã môn tương ứng với cột G)': pd.Series(list_i_mamon_tuong_ung),
+    }).fillna("")
+
+    shutil.copy(file_path, output_path)
+    with pd.ExcelWriter(output_path, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+        result_df.to_excel(writer, sheet_name='Result', index=False)
+        worksheet = writer.sheets['Result']
+        for col in worksheet.columns:
+            max_length = 0
+            column = col[0].column_letter
+            for cell in col:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except: pass
+            worksheet.column_dimensions[column].width = min(max_length + 2, 40)
+            
+    wb_out = load_workbook(output_path)
+    apply_full_border(wb_out['Result'])
+    wb_out.save(output_path)
+            
+    return output_path
+
+# 2. Các hàm giữ nguyên
 def fill_khlm_logic(folder_path, keywords_str):
     target_file = ""
     for f in os.listdir(folder_path):
@@ -381,7 +470,6 @@ def fill_khlm_logic(folder_path, keywords_str):
     if not target_file: 
         raise ValueError("Không tìm thấy file Excel nào chứa đủ 2 sheet 'KHLM' và 'data'!")
 
-    # Thực thi Core Logic cập nhật
     processor = ExcelDataProcessor(
         input_file=target_file, 
         keywords_str=keywords_str, 
@@ -392,7 +480,6 @@ def fill_khlm_logic(folder_path, keywords_str):
     if not success:
         raise ValueError("Xử lý thất bại. Vui lòng kiểm tra lại định dạng file.")
         
-    # Tạo file Zip nén tất cả file Output
     zip_path = os.path.join(folder_path, "KetQua_KHLM_TongHop.zip")
     output_files = [
         "Ketqua_KHLM.xlsx", "Ketquahoclai_KHLM.xlsx", 
@@ -633,7 +720,7 @@ def extract_class_names_logic(folder_path):
     return op
 
 # ==========================================
-# MENU SIDEBAR (CẬP NHẬT TÊN CHỨC NĂNG)
+# MENU SIDEBAR (CẬP NHẬT CHỨC NĂNG MỚI)
 # ==========================================
 with st.sidebar:
     st.markdown("<h3 style='color: #1E3A8A; font-weight: 700; margin-top: -15px;'>DATA WORKSPACE</h3>", unsafe_allow_html=True)
@@ -642,6 +729,7 @@ with st.sidebar:
     menu_options = {
         "Gộp File Nguồn": "Gộp File Nguồn",
         "Điền KHLM (Updated) (*)": "Điền KHLM (Updated) (*)",
+        "Kiểm tra KHLM (*)": "Kiểm tra KHLM", # ĐÃ THÊM CHỨC NĂNG MỚI THEO YÊU CẦU
         "Lọc KQHT Sinh viên": "Lọc kết quả học tập của sinh viên",
         "Lọc SV Học lại/Cải thiện": "Lọc sinh viên học lại & học cải thiện",
         "Xuất Mã lớp (GK300)": "Xuất Mã lớp theo GK300",
@@ -656,7 +744,7 @@ with st.sidebar:
     choice = menu_options[selected_label]
     
     st.markdown("---")
-    st.caption("Ver 5.0 | Advanced Processor Edition")
+    st.caption("Ver 5.1 | Expert Edition")
 
 # ==========================================
 # GIAO DIỆN CHÍNH (SINGLE-SCREEN GRID LAYOUT)
@@ -672,6 +760,7 @@ st.markdown(f"""
 instructions = {
     "Gộp File Nguồn": "Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa (Mỗi sheet chứa bảng đăng ký).",
     "Điền KHLM (Updated) (*)": "<b>Yêu cầu file:</b> <code>Data_fill.xlsx</code><br><br><b>Sheet KHLM:</b> Cần có các cột <code>TenLop</code>, <code>MaMon</code>, <code>DiaPhuongKHL</code>, <code>DiaPhuongHL</code>.<br><b>Sheet Data:</b> Cần có các cột <code>LopLT</code>, <code>MaMon</code>, <code>MaTram</code>, <code>MSV</code>.",
+    "Kiểm tra KHLM": "<b>Yêu cầu file:</b> <code>Data_SLLM.xlsx</code><br><br><b>Sheet Data:</b> Cột D (Lớp), Cột H (Mã môn).<br><b>Sheet ThongKe:</b> Cột A (Lớp), Cột B (Mã môn).<br><br><b>Kết quả:</b> Đối soát lộ trình thiếu kèm với tên môn tương ứng.",
     "Lọc kết quả học tập của sinh viên": "<b>Yêu cầu:</b> <code>Data_Source.xlsx</code> & <code>Data.xlsb</code><br><br><b>Data_Source.xlsx:</b> Sheet 'DSSV', Cột Q (Lớp), Cột J (Mã SV), Cột D (TK SV).<br><b>Data.xlsb:</b> File nhị phân, Cột A (Mã SV).",
     "Lọc sinh viên học lại & học cải thiện": "<b>Yêu cầu:</b> <code>Data_Source.xlsx</code> & <code>DanhSachDangKy.xlsx</code><br><br><b>DanhSachDangKy.xlsx:</b> Sheet 'Dangky: B,C,T' và 'Danghoc: B,G,O', Cột B (TK SV), Cột C&G (Mã môn), Cột T&O (Số TC).",
     "Xuất Mã lớp theo GK300": "Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa.",
@@ -715,6 +804,7 @@ with col_action:
                     result_file = None
                     if choice == "Gộp File Nguồn": result_file = process_files_logic(temp_dir)
                     elif choice == "Điền KHLM (Updated) (*)": result_file = fill_khlm_logic(temp_dir, keywords_str)
+                    elif choice == "Kiểm tra KHLM": result_file = check_khlm_logic(temp_dir)
                     elif choice == "Lọc kết quả học tập của sinh viên": result_file = compare_data_logic(temp_dir)
                     elif choice == "Lọc sinh viên học lại & học cải thiện": result_file = filter_sv_logic(temp_dir)
                     elif choice == "Xuất Mã lớp theo GK300": result_file = extract_class_names_logic(temp_dir)
