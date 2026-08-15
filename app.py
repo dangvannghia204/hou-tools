@@ -205,7 +205,8 @@ class ExcelDataProcessor:
             msv_col_name = data.columns[idx_msv_data]
             matched_msvs = data.loc[mask, msv_col_name].unique().tolist()
 
-            if any(kw in kj for filter_keywords):
+            # ĐÃ SỬA LỖI TYPO Ở DÒNG DƯỚI ĐÂY: Thêm 'kw in'
+            if any(kw in kj for kw in filter_keywords):
                 if kc not in assigned: assigned[kc] = set()
                 final_msvs = [m for m in matched_msvs if m not in assigned[kc]]
                 assigned[kc].update(final_msvs)
@@ -354,7 +355,7 @@ def format_excel_date(cell):
 # CÁC HÀM XỬ LÝ (WRAPPERS)
 # ==========================================
 
-# --- CHỨC NĂNG MỚI: GOM ĐIỂM UNI ---
+# --- GOM ĐIỂM UNI ---
 def gom_diem_uni_logic(msv_path, data_dir):
     msv_df = pl.read_excel(msv_path, engine="calamine")
     if len(msv_df.columns) == 0:
@@ -1034,7 +1035,7 @@ def extract_class_names_logic(folder_path):
     return op
 
 # ==========================================
-# MENU SIDEBAR (BỔ SUNG GOM ĐIỂM UNI)
+# MENU SIDEBAR 
 # ==========================================
 with st.sidebar:
     st.markdown("<h3 style='color: #1E3A8A; font-weight: 700; margin-top: -15px;'>DATA WORKSPACE</h3>", unsafe_allow_html=True)
@@ -1044,7 +1045,7 @@ with st.sidebar:
         "Gộp File Nguồn": "Gộp File Nguồn",
         "Tra cứu điểm sinh viên (Cả lớp)": "Tra cứu điểm sinh viên (Cả lớp)", 
         "Kiểm tra ĐK Đăng ký (Cả lớp)": "Kiểm tra điều kiện đăng ký môn học (Cả lớp)", 
-        "Gom điểm UNI": "Gom điểm UNI", # CHỨC NĂNG MỚI THÊM VÀO THEO YÊU CẦU
+        "Gom điểm UNI": "Gom điểm UNI", 
         "Điền KHLM (Updated) (*)": "Điền KHLM (Updated) (*)",
         "Kiểm tra KHLM (*)": "Kiểm tra KHLM", 
         "Lọc KQHT Sinh viên": "Lọc kết quả học tập của sinh viên",
@@ -1061,7 +1062,7 @@ with st.sidebar:
     choice = menu_options[selected_label]
     
     st.markdown("---")
-    st.caption("Ver 8.0 | Polars/Rust Integrated")
+    st.caption("Ver 8.1 | Bug Fixed")
 
 # ==========================================
 # GIAO DIỆN CHÍNH (SINGLE-SCREEN GRID LAYOUT)
@@ -1101,6 +1102,7 @@ with col_info:
         </div>
     """, unsafe_allow_html=True)
     
+    # Render các option phụ trợ tùy theo chức năng đang chọn
     keywords_str = ""
     has_header = True
     msv_file = None
