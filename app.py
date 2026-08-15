@@ -90,7 +90,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# CLASS XỬ LÝ LÕI KHLM (Updated)
+# CÁC CLASS & HÀM XỬ LÝ LÕI (GIỮ NGUYÊN)
 # ==========================================
 class ExcelDataProcessor:
     def __init__(self, input_file="Data_fill.xlsx", keywords_str="DNP, HCM", log_callback=print):
@@ -100,25 +100,16 @@ class ExcelDataProcessor:
         self.base_dir = os.path.dirname(os.path.abspath(input_file)) if os.path.dirname(input_file) else os.getcwd()
 
     def run_all_steps(self):
-        self.log("BẮT ĐẦU QUÁ TRÌNH XỬ LÝ DỮ LIỆU...")
-        if not os.path.exists(self.input_file):
-            self.log(f"LỖI: Không tìm thấy file {self.input_file}")
-            return False
-
+        if not os.path.exists(self.input_file): return False
         self._preprocess_khlm()
         out_khl = os.path.join(self.base_dir, "Ketqua_KHLM.xlsx")
         self._run_source_1(is_hoc_lai=False, output_path=out_khl)
-        
         out_hl = os.path.join(self.base_dir, "Ketquahoclai_KHLM.xlsx")
         self._run_source_1(is_hoc_lai=True, output_path=out_hl)
-        
         out_merge = os.path.join(self.base_dir, "Data_Merge.xlsx")
         self._merge_results(out_khl, out_hl, out_merge)
-        
         out_lopmon = os.path.join(self.base_dir, "LopMon_Ketqua.xlsx")
         self._run_source_2_and_map(out_merge, out_lopmon)
-        
-        self.log("\nHOÀN THÀNH TOÀN BỘ QUÁ TRÌNH!")
         return True
 
     def _preprocess_khlm(self):
@@ -153,10 +144,8 @@ class ExcelDataProcessor:
             
             if added_codes:
                 str_to_add = ",".join(added_codes)
-                if current_dp_khl.strip():
-                    df_khlm.at[index, 'DiaPhuongKHL'] = f"{current_dp_khl},{str_to_add}"
-                else:
-                    df_khlm.at[index, 'DiaPhuongKHL'] = str_to_add
+                if current_dp_khl.strip(): df_khlm.at[index, 'DiaPhuongKHL'] = f"{current_dp_khl},{str_to_add}"
+                else: df_khlm.at[index, 'DiaPhuongKHL'] = str_to_add
 
         with pd.ExcelWriter(self.input_file, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
              df_khlm.to_excel(writer, sheet_name=actual_khlm, index=False)
@@ -210,8 +199,7 @@ class ExcelDataProcessor:
                     lambda x: (x.strip() in kh) or (kh in x.strip())
                 )
                 mask = mask_mamon & mask_loplt & mask_matram
-            else:
-                mask = mask_mamon & mask_matram
+            else: mask = mask_mamon & mask_matram
 
             msv_col_name = data.columns[idx_msv_data]
             matched_msvs = data.loc[mask, msv_col_name].unique().tolist()
@@ -287,7 +275,6 @@ class ExcelDataProcessor:
                      for part in str(val_c).split('/'):
                          part_clean = part.strip()
                          if part_clean: result_data_for_mapping["" + part_clean] = col_h
-
         wb.save(file_lopmon_out)
 
         wb_fill = load_workbook(self.input_file)
@@ -321,7 +308,6 @@ class ExcelDataProcessor:
                     if alt_key in result_data_for_mapping:
                         ws_fill_data.cell(row=row, column=col_idx_macoursett, value=result_data_for_mapping[alt_key])
                         break 
-        
         wb_fill.save(os.path.join(self.base_dir, "Data_fill_Finish.xlsx"))
 
 # ==========================================
@@ -364,50 +350,244 @@ def format_excel_date(cell):
     return v.strftime("%d/%m/%Y") if isinstance(v, datetime) else (str(v) if v else "")
 
 # ==========================================
-# CÁC HÀM LOGIC XỬ LÝ (Streamlit Wrapper)
+# HÀM XỬ LÝ SELENIUM MỚI (TRA CỨU ĐIỂM)
 # ==========================================
+def scrape_ehou_logic(folder_path, status_placeholder=None):
+    from selenium import webdriver
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.webdriver.common.keys import Keys
+    import time
 
-# 1. Bổ sung hàm Kiểm tra KHLM mới
+    def fast_paste(driver, element, text_data):
+        script = """
+            var elm = arguments[0];
+            elm.value = arguments[1];
+            elm.dispatchEvent(new Event('input', { bubbles: true }));
+            elm.dispatchEvent(new Event('change', { bubbles: true }));
+        """
+        driver.execute_script(script, element, text_data)
+
+    input_file = None
+    for f in os.listdir(folder_path):
+        if f.endswith(('.xlsx', '.xls')) and not f.startswith('~$'):
+            input_file = os.path.join(folder_path, f)
+            break
+            
+    if not input_file: raise ValueError("Không tìm thấy file Excel nguồn trong thư mục!")
+
+    xls = pd.ExcelFile(input_file)
+    if 'Login' not in xls.sheet_names or 'Data' not in xls.sheet_names:
+        raise ValueError("File Excel phải chứa đúng 2 sheet: 'Login' và 'Data'.")
+
+    df_login = pd.read_excel(xls, sheet_name='Login')
+    username = str(df_login.iloc[0, 0]).strip().lstrip("'")
+    password_raw = str(df_login.iloc[0, 1]).strip().lstrip("'")
+    password = password_raw.strip("/") 
+    
+    df_data = pd.read_excel(xls, sheet_name='Data', dtype=str)
+    total_rows = len(df_data)
+    batch_size = 100 
+
+    result_path = os.path.join(folder_path, "Ket_Qua_Tra_Cuu.xlsx")
+    temp_csv_path = os.path.join(folder_path, "temp_backup_result.csv")
+
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless=new")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+
+    driver = webdriver.Chrome(options=options)
+    wait = WebDriverWait(driver, 25) 
+
+    try:
+        if status_placeholder: status_placeholder.info("⚙️ Đang truy cập và đăng nhập hệ thống EHOU...")
+        driver.get("https://learning.ehou.edu.vn")
+        
+        txt_user = wait.until(EC.presence_of_element_located((By.NAME, "username")))
+        txt_user.clear()
+        txt_user.send_keys(username)
+
+        txt_pass = driver.find_element(By.NAME, "password")
+        txt_pass.clear()
+        txt_pass.send_keys(password)
+        txt_pass.send_keys(Keys.RETURN) 
+
+        time.sleep(5) 
+        
+        for start_idx in range(0, total_rows, batch_size):
+            end_idx = min(start_idx + batch_size, total_rows)
+            if status_placeholder: status_placeholder.info(f"🔎 Đang tra cứu dữ liệu: Lô từ dòng {start_idx + 1} đến {end_idx}...")
+            
+            chunk = df_data.iloc[start_idx:end_idx] 
+            chunk_accounts = []
+            chunk_courses = []
+            
+            for index, row in chunk.iterrows():
+                account_val = str(row.iloc[0]).strip()
+                if not account_val or account_val == 'nan': continue
+                    
+                for col_idx in range(1, 16):
+                    if col_idx >= len(row): break
+                    course_val = str(row.iloc[col_idx]).strip()
+                    if course_val and course_val != 'nan':
+                        chunk_accounts.append(account_val)
+                        chunk_courses.append(course_val)
+                        
+            if not chunk_accounts: continue
+                
+            account_str_to_paste = " ".join(chunk_accounts)
+            course_str_to_paste = " ".join(chunk_courses)
+            
+            driver.get("https://learning.ehou.edu.vn/grade/report/overview/advance.php")
+            
+            try:
+                txt_account = wait.until(EC.presence_of_element_located((By.XPATH, "//label[contains(text(), 'Cột tài khoản')]/following-sibling::*[self::input or self::textarea]")))
+                fast_paste(driver, txt_account, account_str_to_paste)
+
+                txt_course = driver.find_element(By.XPATH, "//label[contains(text(), 'Cột mã môn')]/following-sibling::*[self::input or self::textarea]")
+                fast_paste(driver, txt_course, course_str_to_paste)
+
+                driver.execute_script("""
+                    var oldTables = document.getElementsByTagName('table');
+                    for (var i = oldTables.length - 1; i >= 0; i--) {
+                        oldTables[i].parentNode.removeChild(oldTables[i]);
+                    }
+                """)
+
+                txt_course.send_keys(Keys.RETURN)
+                
+                try:
+                    wait.until(EC.presence_of_element_located((By.XPATH, "//table[contains(., 'Mã lớp môn')]")))
+                    time.sleep(0.5) 
+                except: pass 
+
+                js_extract_script = """
+                    var tables = document.getElementsByTagName('table');
+                    var targetTable = null;
+                    for (var k = 0; k < tables.length; k++) {
+                        if (tables[k].innerText.includes('Mã lớp môn') && tables[k].innerText.includes('Học viên')) {
+                            targetTable = tables[k];
+                            break;
+                        }
+                    }
+                    if (!targetTable) return null;
+                    var data = [];
+                    var rows = targetTable.rows;
+                    for (var i = 0; i < rows.length; i++) {
+                        var rowData = [];
+                        var cols = rows[i].cells;
+                        for (var j = 0; j < cols.length; j++) {
+                            rowData.push(cols[j].innerText.trim().replace(/\\n/g, ' '));
+                        }
+                        data.push(rowData);
+                    }
+                    return data;
+                """
+                
+                table_data = driver.execute_script(js_extract_script)
+                df_result = None
+
+                if table_data and len(table_data) > 1:
+                    max_cols = max(len(r) for r in table_data)
+                    cleaned_data = [r + [""] * (max_cols - len(r)) for r in table_data]
+                    
+                    headers = cleaned_data[0]
+                    final_headers = []
+                    for i, h in enumerate(headers):
+                        if not h: h = f"Cot_trong_{i}"
+                        if h in final_headers: h = f"{h}_{i}"
+                        final_headers.append(h)
+                        
+                    temp_df = pd.DataFrame(cleaned_data[1:], columns=final_headers)
+                    expected_columns = [
+                        "TT", "Học viên", "Họ tên sinh viên", "Mã lớp môn", "Tên lớp môn", 
+                        "Lớp quản lý", "Email", "Quá trình", "Kiểm tra giữa kỳ", 
+                        "Kết thúc học phần", "Tổng kết", "Thời gian bắt đầu"
+                    ]
+                    
+                    if "STT" in temp_df.columns and "TT" not in temp_df.columns:
+                        temp_df = temp_df.rename(columns={"STT": "TT"})
+                        
+                    extracted_cols = []
+                    for expected in expected_columns:
+                        if expected in temp_df.columns: extracted_cols.append(expected)
+                        else:
+                            for c in temp_df.columns:
+                                if expected.lower() in str(c).lower() or str(c).lower() in expected.lower():
+                                    if c not in extracted_cols:
+                                        temp_df = temp_df.rename(columns={c: expected})
+                                        extracted_cols.append(expected)
+                                    break
+                    
+                    if extracted_cols: df_result = temp_df[extracted_cols]
+                    else: df_result = temp_df 
+
+                if df_result is None or df_result.empty:
+                    body_text = driver.find_element(By.TAG_NAME, "body").text
+                    if "Apereo" in body_text and "Username" in body_text:
+                        raise Exception("BỊ VĂNG KHỎI PHIÊN ĐĂNG NHẬP (Session Timeout)")
+                    
+                    df_result = pd.DataFrame([{
+                        "Học viên": f"Lô dòng {start_idx + 1} - {end_idx}", 
+                        "Mã lớp môn": "Nhiều môn", 
+                        "Ghi chú": "Không có kết quả / Web lỗi / Không tìm thấy"
+                    }])
+
+                if not os.path.exists(temp_csv_path):
+                    df_result.to_csv(temp_csv_path, index=False, mode='w', encoding='utf-8-sig')
+                else:
+                    df_result.to_csv(temp_csv_path, index=False, mode='a', header=False, encoding='utf-8-sig')
+
+            except Exception as e:
+                df_err = pd.DataFrame([{
+                    "Học viên": f"Lô dòng {start_idx + 1} - {end_idx}", 
+                    "Mã lớp môn": "Nhiều môn", 
+                    "Ghi chú": f"LỖI HỆ THỐNG: {str(e)}"
+                }])
+                if not os.path.exists(temp_csv_path): df_err.to_csv(temp_csv_path, index=False, mode='w', encoding='utf-8-sig')
+                else: df_err.to_csv(temp_csv_path, index=False, mode='a', header=False, encoding='utf-8-sig')
+        
+        if os.path.exists(temp_csv_path):
+            final_df = pd.read_csv(temp_csv_path)
+            final_df.to_excel(result_path, sheet_name="Ket_Qua_Tong_Hop", index=False, engine='openpyxl')
+            os.remove(temp_csv_path) 
+            
+        return result_path
+
+    finally:
+        if driver: driver.quit()
+
+# ==========================================
+# CÁC HÀM WRAPPERS KHÁC
+# ==========================================
 def check_khlm_logic(folder_path):
     file_path = os.path.join(folder_path, "Data_SLLM.xlsx")
-    if not os.path.exists(file_path): 
-        raise ValueError("Không tìm thấy tệp Data_SLLM.xlsx!")
-    
+    if not os.path.exists(file_path): raise ValueError("Không tìm thấy tệp Data_SLLM.xlsx!")
     output_path = os.path.join(folder_path, "Data_SLLM_Finish.xlsx")
-    
-    try:
-        df_data = pd.read_excel(file_path, sheet_name='Data', usecols="D,H")
-    except ValueError:
-        raise Exception("Không tìm thấy Sheet 'Data' hoặc thiếu cột D, H.")
-    
+    try: df_data = pd.read_excel(file_path, sheet_name='Data', usecols="D,H")
+    except ValueError: raise Exception("Không tìm thấy Sheet 'Data' hoặc thiếu cột D, H.")
     df_data.columns = ['Lop', 'MaMon']
     df_data = df_data.dropna(subset=['MaMon'])
     df_data['Lop'] = df_data['Lop'].astype(str).str.strip()
     df_data['MaMon'] = df_data['MaMon'].astype(str).str.strip()
-    
     grouped_data = df_data.groupby('MaMon')['Lop'].apply(lambda x: ', '.join(sorted(set(x)))).reset_index()
     list_b_mamon_data = grouped_data['MaMon'].tolist()
     list_a_lop_data = grouped_data['Lop'].tolist()
-
-    try:
-        df_tk = pd.read_excel(file_path, sheet_name='ThongKe', usecols="A,B")
-    except ValueError:
-        raise Exception("Không tìm thấy Sheet 'ThongKe' hoặc thiếu cột A, B.")
-    
+    try: df_tk = pd.read_excel(file_path, sheet_name='ThongKe', usecols="A,B")
+    except ValueError: raise Exception("Không tìm thấy Sheet 'ThongKe' hoặc thiếu cột A, B.")
     df_tk.columns = ['TenLop', 'MaMon']
     df_tk = df_tk.dropna(subset=['MaMon'])
     df_tk['TenLop'] = df_tk['TenLop'].astype(str).str.strip()
     df_tk['MaMon'] = df_tk['MaMon'].astype(str).str.strip()
-
     grouped_tk = df_tk.groupby('MaMon')['TenLop'].apply(lambda x: ', '.join(sorted(set(x)))).reset_index()
     list_e_mamon_tk = grouped_tk['MaMon'].tolist()
     list_d_lop_tk = grouped_tk['TenLop'].tolist()
-
-    list_g_lop_thieu = []
-    list_h_mamon_thieu = []
-    list_i_mamon_tuong_ung = []
+    list_g_lop_thieu, list_h_mamon_thieu, list_i_mamon_tuong_ung = [], [], []
     dict_tk = dict(zip(list_e_mamon_tk, list_d_lop_tk))
-
     for i, ma_mon_data in enumerate(list_b_mamon_data):
         classes_in_data = [c.strip() for c in list_a_lop_data[i].split(',')]
         if ma_mon_data not in dict_tk:
@@ -421,19 +601,12 @@ def check_khlm_logic(folder_path):
                 if cls not in classes_in_tk:
                     list_g_lop_thieu.append(cls)
                     list_i_mamon_tuong_ung.append(ma_mon_data)
-
     result_df = pd.DataFrame({
-        'Cột A (Lớp_D)': pd.Series(list_a_lop_data),
-        'Cột B (Mã môn_D)': pd.Series(list_b_mamon_data),
-        'Cột C (Trống)': pd.Series([], dtype=str),
-        'Cột D (Lớp_TK)': pd.Series(list_d_lop_tk),
-        'Cột E (Mã môn_TK)': pd.Series(list_e_mamon_tk),
-        'Cột F (Trống)': pd.Series([], dtype=str),
-        'Cột G (Lớp_D thiếu trong Lớp_TK)': pd.Series(list_g_lop_thieu),
-        'Cột H (Mã môn_D thiếu trong Mã môn_TK)': pd.Series(list_h_mamon_thieu),
+        'Cột A (Lớp_D)': pd.Series(list_a_lop_data), 'Cột B (Mã môn_D)': pd.Series(list_b_mamon_data), 'Cột C (Trống)': pd.Series([], dtype=str),
+        'Cột D (Lớp_TK)': pd.Series(list_d_lop_tk), 'Cột E (Mã môn_TK)': pd.Series(list_e_mamon_tk), 'Cột F (Trống)': pd.Series([], dtype=str),
+        'Cột G (Lớp_D thiếu trong Lớp_TK)': pd.Series(list_g_lop_thieu), 'Cột H (Mã môn_D thiếu trong Mã môn_TK)': pd.Series(list_h_mamon_thieu),
         'Cột I (Mã môn tương ứng với cột G)': pd.Series(list_i_mamon_tuong_ung),
     }).fillna("")
-
     shutil.copy(file_path, output_path)
     with pd.ExcelWriter(output_path, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
         result_df.to_excel(writer, sheet_name='Result', index=False)
@@ -443,18 +616,14 @@ def check_khlm_logic(folder_path):
             column = col[0].column_letter
             for cell in col:
                 try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
+                    if len(str(cell.value)) > max_length: max_length = len(str(cell.value))
                 except: pass
             worksheet.column_dimensions[column].width = min(max_length + 2, 40)
-            
     wb_out = load_workbook(output_path)
     apply_full_border(wb_out['Result'])
     wb_out.save(output_path)
-            
     return output_path
 
-# 2. Các hàm giữ nguyên
 def fill_khlm_logic(folder_path, keywords_str):
     target_file = ""
     for f in os.listdir(folder_path):
@@ -466,31 +635,16 @@ def fill_khlm_logic(folder_path, keywords_str):
                     target_file = os.path.join(folder_path, f)
                     break
             except: continue
-            
-    if not target_file: 
-        raise ValueError("Không tìm thấy file Excel nào chứa đủ 2 sheet 'KHLM' và 'data'!")
-
-    processor = ExcelDataProcessor(
-        input_file=target_file, 
-        keywords_str=keywords_str, 
-        log_callback=lambda msg: None 
-    )
+    if not target_file: raise ValueError("Không tìm thấy file Excel nào chứa đủ 2 sheet 'KHLM' và 'data'!")
+    processor = ExcelDataProcessor(input_file=target_file, keywords_str=keywords_str, log_callback=lambda msg: None)
     success = processor.run_all_steps()
-    
-    if not success:
-        raise ValueError("Xử lý thất bại. Vui lòng kiểm tra lại định dạng file.")
-        
+    if not success: raise ValueError("Xử lý thất bại. Vui lòng kiểm tra lại định dạng file.")
     zip_path = os.path.join(folder_path, "KetQua_KHLM_TongHop.zip")
-    output_files = [
-        "Ketqua_KHLM.xlsx", "Ketquahoclai_KHLM.xlsx", 
-        "Data_Merge.xlsx", "LopMon_Ketqua.xlsx", "Data_fill_Finish.xlsx"
-    ]
+    output_files = ["Ketqua_KHLM.xlsx", "Ketquahoclai_KHLM.xlsx", "Data_Merge.xlsx", "LopMon_Ketqua.xlsx", "Data_fill_Finish.xlsx"]
     with zipfile.ZipFile(zip_path, 'w') as zipf:
         for fname in output_files:
             fpath = os.path.join(folder_path, fname)
-            if os.path.exists(fpath):
-                zipf.write(fpath, fname)
-                
+            if os.path.exists(fpath): zipf.write(fpath, fname)
     return zip_path
 
 def extract_courses_logic(folder_path):
@@ -499,9 +653,7 @@ def extract_courses_logic(folder_path):
     output_file = os.path.join(folder_path, "Courses_List.xlsx")
     wb_out = Workbook(); wb_out.remove(wb_out.active)
     for idx, file_name in enumerate(files):
-        try:
-            parts = file_name.split('- ')
-            major_name = parts[1].split('.')[0].strip() if len(parts) > 1 else file_name.split('.')[0].strip()
+        try: parts = file_name.split('- '); major_name = parts[1].split('.')[0].strip() if len(parts) > 1 else file_name.split('.')[0].strip()
         except: major_name = file_name[:25] 
         ws_major = wb_out.create_sheet(title=major_name[:30])
         unique_courses = set()
@@ -720,7 +872,7 @@ def extract_class_names_logic(folder_path):
     return op
 
 # ==========================================
-# MENU SIDEBAR (CẬP NHẬT CHỨC NĂNG MỚI)
+# MENU SIDEBAR (CẬP NHẬT CHỨC NĂNG TRA CỨU ĐIỂM)
 # ==========================================
 with st.sidebar:
     st.markdown("<h3 style='color: #1E3A8A; font-weight: 700; margin-top: -15px;'>DATA WORKSPACE</h3>", unsafe_allow_html=True)
@@ -728,8 +880,9 @@ with st.sidebar:
     
     menu_options = {
         "Gộp File Nguồn": "Gộp File Nguồn",
+        "Tra cứu điểm sinh viên (Cả lớp)": "Tra cứu điểm sinh viên (Cả lớp)", # CHỨC NĂNG MỚI THÊM VÀO 
         "Điền KHLM (Updated) (*)": "Điền KHLM (Updated) (*)",
-        "Kiểm tra KHLM (*)": "Kiểm tra KHLM", # ĐÃ THÊM CHỨC NĂNG MỚI THEO YÊU CẦU
+        "Kiểm tra KHLM (*)": "Kiểm tra KHLM", 
         "Lọc KQHT Sinh viên": "Lọc kết quả học tập của sinh viên",
         "Lọc SV Học lại/Cải thiện": "Lọc sinh viên học lại & học cải thiện",
         "Xuất Mã lớp (GK300)": "Xuất Mã lớp theo GK300",
@@ -744,7 +897,7 @@ with st.sidebar:
     choice = menu_options[selected_label]
     
     st.markdown("---")
-    st.caption("Ver 5.1 | Expert Edition")
+    st.caption("Ver 6.0 | EHOU Automation Edition")
 
 # ==========================================
 # GIAO DIỆN CHÍNH (SINGLE-SCREEN GRID LAYOUT)
@@ -756,9 +909,9 @@ st.markdown(f"""
     </div>
 """, unsafe_allow_html=True)
 
-# Khai báo từ điển hướng dẫn
 instructions = {
     "Gộp File Nguồn": "Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa (Mỗi sheet chứa bảng đăng ký).",
+    "Tra cứu điểm sinh viên (Cả lớp)": "<b>Tự động Scraping EHOU (Headless):</b><br><br><b>File yêu cầu:</b> Excel chuẩn bị sẵn với 2 sheet:<br><b>1. Sheet 'Login':</b> Ô A1 (Tài khoản), Ô B1 (Mật khẩu).<br><b>2. Sheet 'Data':</b> Cột 1 (Tài khoản SV), Các cột sau chứa mã môn học.",
     "Điền KHLM (Updated) (*)": "<b>Yêu cầu file:</b> <code>Data_fill.xlsx</code><br><br><b>Sheet KHLM:</b> Cần có các cột <code>TenLop</code>, <code>MaMon</code>, <code>DiaPhuongKHL</code>, <code>DiaPhuongHL</code>.<br><b>Sheet Data:</b> Cần có các cột <code>LopLT</code>, <code>MaMon</code>, <code>MaTram</code>, <code>MSV</code>.",
     "Kiểm tra KHLM": "<b>Yêu cầu file:</b> <code>Data_SLLM.xlsx</code><br><br><b>Sheet Data:</b> Cột D (Lớp), Cột H (Mã môn).<br><b>Sheet ThongKe:</b> Cột A (Lớp), Cột B (Mã môn).<br><br><b>Kết quả:</b> Đối soát lộ trình thiếu kèm với tên môn tương ứng.",
     "Lọc kết quả học tập của sinh viên": "<b>Yêu cầu:</b> <code>Data_Source.xlsx</code> & <code>Data.xlsb</code><br><br><b>Data_Source.xlsx:</b> Sheet 'DSSV', Cột Q (Lớp), Cột J (Mã SV), Cột D (TK SV).<br><b>Data.xlsb:</b> File nhị phân, Cột A (Mã SV).",
@@ -786,6 +939,8 @@ with col_info:
     if choice == "Điền KHLM (Updated) (*)":
         keywords_str = st.text_input("Thiết lập điều kiện (Từ khóa địa phương):", value="DNP, ĐN ( học tại HCM)")
 
+    status_container = st.empty() # Khung chứa text hiển thị trạng thái cho Selenium
+
 # --- Cột Phải: Uploader & Button Xử lý ---
 with col_action:
     uploaded_files = st.file_uploader("Kéo thả các file Excel vào đây", accept_multiple_files=True, type=['xlsx', 'xlsb'])
@@ -800,9 +955,10 @@ with col_action:
                     with open(os.path.join(temp_dir, uploaded_file.name), "wb") as f:
                         f.write(uploaded_file.getbuffer())
                 
-                with st.spinner('⚙️ Đang xử lý...'):
+                with st.spinner('⚙️ Hệ thống đang xử lý...'):
                     result_file = None
                     if choice == "Gộp File Nguồn": result_file = process_files_logic(temp_dir)
+                    elif choice == "Tra cứu điểm sinh viên (Cả lớp)": result_file = scrape_ehou_logic(temp_dir, status_container)
                     elif choice == "Điền KHLM (Updated) (*)": result_file = fill_khlm_logic(temp_dir, keywords_str)
                     elif choice == "Kiểm tra KHLM": result_file = check_khlm_logic(temp_dir)
                     elif choice == "Lọc kết quả học tập của sinh viên": result_file = compare_data_logic(temp_dir)
@@ -815,6 +971,7 @@ with col_action:
                     elif choice == "Xuất môn theo ngành học (*)": result_file = extract_courses_logic(temp_dir)
 
                     if result_file and os.path.exists(result_file):
+                        status_container.empty()
                         st.toast('Xử lý thành công!', icon='✅')
                         with open(result_file, "rb") as f:
                             file_data = f.read()
@@ -832,6 +989,7 @@ with col_action:
                         st.error("❌ Xử lý thất bại. Kiểm tra cấu trúc file.")
                         
             except Exception as e:
+                status_container.empty()
                 st.error(f"❌ Lỗi hệ thống: `{str(e)}`")
             finally:
                 shutil.rmtree(temp_dir)
