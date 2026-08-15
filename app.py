@@ -7,6 +7,7 @@ from datetime import datetime
 from copy import copy
 import pandas as pd
 import numpy as np
+import polars as pl
 from openpyxl import load_workbook, Workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill, Alignment, Font, Border, Side
@@ -204,7 +205,7 @@ class ExcelDataProcessor:
             msv_col_name = data.columns[idx_msv_data]
             matched_msvs = data.loc[mask, msv_col_name].unique().tolist()
 
-            if any(kw in kj for kw in filter_keywords):
+            if any(kw in kj for filter_keywords):
                 if kc not in assigned: assigned[kc] = set()
                 final_msvs = [m for m in matched_msvs if m not in assigned[kc]]
                 assigned[kc].update(final_msvs)
@@ -350,8 +351,172 @@ def format_excel_date(cell):
     return v.strftime("%d/%m/%Y") if isinstance(v, datetime) else (str(v) if v else "")
 
 # ==========================================
-# HÀM XỬ LÝ SELENIUM & LOGIC ĐỐI SOÁT
+# CÁC HÀM XỬ LÝ (WRAPPERS)
 # ==========================================
+
+# --- CHỨC NĂNG MỚI: GOM ĐIỂM UNI ---
+def gom_diem_uni_logic(msv_path, data_dir):
+    msv_df = pl.read_excel(msv_path, engine="calamine")
+    if len(msv_df.columns) == 0:
+        raise ValueError("File MSV rỗng.")
+        
+    first_col = msv_df.columns[0]
+    raw_msvs = msv_df.get_column(first_col).drop_nulls().cast(pl.Utf8)
+    cleaned_msvs = (
+        raw_msvs.str.strip_chars()
+        .str.to_uppercase()
+        .str.replace(r"\.0$", "", literal=False)
+    )
+    
+    msv_set = set(cleaned_msvs.to_list())
+    msv_set.discard("") 
+    msv_list = list(msv_set)
+    
+    if not msv_list:
+        raise ValueError("Không tìm thấy MSV hợp lệ trong file MSV.")
+
+    target_files = []
+    for root_dir, dirs, files in os.walk(data_dir):
+        for file in files:
+            file_lower = file.lower()
+            if file_lower.endswith(('.xlsx', '.xls', '.xlsm', '.xlsb')) and not file.startswith('~$') and file_lower != "result.xlsx":
+                target_files.append(os.path.join(root_dir, file))
+
+    if not target_files:
+        raise ValueError("Không có file dữ liệu nào để quét.")
+
+    all_matched_data = []
+
+    for file_path in target_files:
+        filename = os.path.basename(file_path)
+        try:
+            sheets_dict = pl.read_excel(file_path, engine="calamine", sheet_id=0)
+            if isinstance(sheets_dict, pl.DataFrame):
+                sheets_dict = {"Sheet1": sheets_dict}
+
+            for sheet_name, df in sheets_dict.items():
+                if df.is_empty() or len(df.columns) == 0:
+                    continue
+
+                df = df.select(pl.all().cast(pl.Utf8))
+                
+                exprs = [
+                    pl.col(c).str.strip_chars().str.to_uppercase().is_in(msv_list)
+                    for c in df.columns
+                ]
+                
+                mask = pl.any_horizontal(*exprs)
+                matched_df = df.filter(mask)
+
+                if len(matched_df) > 0:
+                    matched_rows = matched_df.to_pandas()
+                    matched_rows = matched_rows.fillna("")
+                    matched_rows.insert(0, 'Nguồn_File', filename)
+                    matched_rows.insert(1, 'Nguồn_Sheet', sheet_name)
+                    matched_rows.insert(2, 'Đường_Dẫn_File', filename)
+                    
+                    all_matched_data.append(matched_rows)
+        except Exception as e:
+            pass
+
+    if all_matched_data:
+        final_df = pd.concat(all_matched_data, ignore_index=True)
+        output_path = os.path.join(data_dir, "Result.xlsx")
+        
+        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+            final_df.to_excel(writer, index=False, sheet_name='DuLieuTrichXuat')
+            worksheet = writer.sheets['DuLieuTrichXuat']
+            for idx, col in enumerate(worksheet.columns, 1):
+                max_length = 0
+                column_letter = col[0].column_letter
+                for cell in col:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except: pass
+                adjusted_width = min((max_length + 2), 50)
+                worksheet.column_dimensions[column_letter].width = adjusted_width
+                
+        return output_path
+    else:
+        raise ValueError("Quá trình quét kết thúc. Không tìm thấy dữ liệu nào trùng khớp với danh sách MSV.")
+
+def check_dk_dangky_logic(folder_path, has_header):
+    output_files = []
+    for f in os.listdir(folder_path):
+        if f.endswith(('.xlsx', '.xls')) and not f.startswith('~$'):
+            input_file = os.path.join(folder_path, f)
+            df = pd.read_excel(input_file, header=None)
+            
+            if has_header:
+                header_row = df.iloc[0:1].copy()
+                df = df.iloc[1:].copy()
+            else: header_row = pd.DataFrame()
+
+            while df.shape[1] < 15: df[df.shape[1]] = None
+            B, D, H, I, L, M, N, O = 1, 3, 7, 8, 11, 12, 13, 14
+            df = df.sort_values(by=[B, D], ascending=[True, True]).reset_index(drop=True)
+
+            def extract_before_last_dot(val):
+                if pd.isna(val): return ""
+                val_str = str(val)
+                if '.' in val_str: return val_str.rsplit('.', 1)[0]
+                return val_str
+
+            df[M] = df[D].apply(extract_before_last_dot)
+
+            temp_h_str = df[H].astype(str).str.replace(',', '.', regex=False)
+            temp_h = pd.to_numeric(temp_h_str, errors='coerce').astype(float)
+            temp_i_str = df[I].astype(str).str.replace(',', '.', regex=False)
+            temp_i = pd.to_numeric(temp_i_str, errors='coerce').astype(float)
+            temp_l = pd.to_datetime(df[L], errors='coerce', dayfirst=True)
+
+            df[N] = ""
+            for (val_b, val_m), group in df.groupby([B, M]):
+                if pd.isna(val_b) and pd.isna(val_m): continue
+                valid_dates_idx = temp_l[group.index].dropna().index
+                if not valid_dates_idx.empty: latest_idx = temp_l[valid_dates_idx].idxmax()
+                else: latest_idx = group.index[0]
+
+                h_val = temp_h.at[latest_idx]
+                i_val = temp_i.at[latest_idx]
+
+                if pd.notna(h_val) and pd.notna(i_val):
+                    try:
+                        if float(h_val) >= 40.0 and float(i_val) >= 40.0: df.at[latest_idx, N] = "YES"
+                        else: df.at[latest_idx, N] = "NO"
+                    except ValueError: df.at[latest_idx, N] = "NO"
+                else: df.at[latest_idx, N] = "NO"
+
+            df[O] = ""
+            for (val_b, val_m), group in df.groupby([B, M]):
+                yes_indices = group[df.loc[group.index, N] == "YES"].index
+                if len(yes_indices) > 0:
+                    unique_dates = temp_l[group.index].dropna().nunique()
+                    for idx in yes_indices:
+                        if unique_dates > 1: df.at[idx, O] = "TL"
+                        else: df.at[idx, O] = "TL1"
+
+            if has_header:
+                while header_row.shape[1] < df.shape[1]: header_row[header_row.shape[1]] = ""
+                if pd.isna(header_row.at[0, M]) or header_row.at[0, M] == "": header_row.at[0, M] = "Kết quả M"
+                if pd.isna(header_row.at[0, N]) or header_row.at[0, N] == "": header_row.at[0, N] = "Đánh giá N"
+                if pd.isna(header_row.at[0, O]) or header_row.at[0, O] == "": header_row.at[0, O] = "Phân loại O"
+                df = pd.concat([header_row, df], ignore_index=True)
+
+            name, ext = os.path.splitext(f)
+            out_filename = f"{name}_finish{ext}"
+            out_filepath = os.path.join(folder_path, out_filename)
+            df.to_excel(out_filepath, index=False, header=False)
+            output_files.append(out_filepath)
+            
+    if not output_files: raise ValueError("Không có file Excel nào để xử lý.")
+    if len(output_files) == 1: return output_files[0]
+    zip_path = os.path.join(folder_path, "KetQua_KiemTra_DK.zip")
+    with zipfile.ZipFile(zip_path, 'w') as zipf:
+        for fpath in output_files: zipf.write(fpath, os.path.basename(fpath))
+    return zip_path
+
 def scrape_ehou_logic(folder_path, status_placeholder=None):
     from selenium import webdriver
     from selenium.webdriver.common.by import By
@@ -561,108 +726,6 @@ def scrape_ehou_logic(folder_path, status_placeholder=None):
     finally:
         if driver: driver.quit()
 
-# ------------------------------------------
-# CHỨC NĂNG MỚI: KIỂM TRA ĐIỀU KIỆN ĐĂNG KÝ
-# ------------------------------------------
-def check_dk_dangky_logic(folder_path, has_header):
-    output_files = []
-    for f in os.listdir(folder_path):
-        if f.endswith(('.xlsx', '.xls')) and not f.startswith('~$'):
-            input_file = os.path.join(folder_path, f)
-            
-            # 1. Đọc file
-            df = pd.read_excel(input_file, header=None)
-            
-            if has_header:
-                header_row = df.iloc[0:1].copy()
-                df = df.iloc[1:].copy()
-            else:
-                header_row = pd.DataFrame()
-
-            # Chêm cột trống nếu file ít hơn 15 cột (Tới cột O)
-            while df.shape[1] < 15:
-                df[df.shape[1]] = None
-
-            B, D, H, I, L, M, N, O = 1, 3, 7, 8, 11, 12, 13, 14
-
-            # 2. Sắp xếp
-            df = df.sort_values(by=[B, D], ascending=[True, True]).reset_index(drop=True)
-
-            def extract_before_last_dot(val):
-                if pd.isna(val): return ""
-                val_str = str(val)
-                if '.' in val_str: return val_str.rsplit('.', 1)[0]
-                return val_str
-
-            df[M] = df[D].apply(extract_before_last_dot)
-
-            # 3. Ép kiểu dữ liệu (Xử lý dấu phẩy thập phân)
-            temp_h_str = df[H].astype(str).str.replace(',', '.', regex=False)
-            temp_h = pd.to_numeric(temp_h_str, errors='coerce').astype(float)
-            
-            temp_i_str = df[I].astype(str).str.replace(',', '.', regex=False)
-            temp_i = pd.to_numeric(temp_i_str, errors='coerce').astype(float)
-            
-            temp_l = pd.to_datetime(df[L], errors='coerce', dayfirst=True)
-
-            df[N] = ""
-
-            # 4. Phân tích nhóm và đánh giá N
-            for (val_b, val_m), group in df.groupby([B, M]):
-                if pd.isna(val_b) and pd.isna(val_m): continue
-                
-                valid_dates_idx = temp_l[group.index].dropna().index
-                if not valid_dates_idx.empty:
-                    latest_idx = temp_l[valid_dates_idx].idxmax()
-                else:
-                    latest_idx = group.index[0]
-
-                h_val = temp_h.at[latest_idx]
-                i_val = temp_i.at[latest_idx]
-
-                if pd.notna(h_val) and pd.notna(i_val):
-                    try:
-                        if float(h_val) >= 40.0 and float(i_val) >= 40.0: df.at[latest_idx, N] = "YES"
-                        else: df.at[latest_idx, N] = "NO"
-                    except ValueError: df.at[latest_idx, N] = "NO"
-                else: df.at[latest_idx, N] = "NO"
-
-            # 5. Phân loại trạng thái O
-            df[O] = ""
-            for (val_b, val_m), group in df.groupby([B, M]):
-                yes_indices = group[df.loc[group.index, N] == "YES"].index
-                if len(yes_indices) > 0:
-                    unique_dates = temp_l[group.index].dropna().nunique()
-                    for idx in yes_indices:
-                        if unique_dates > 1: df.at[idx, O] = "TL"
-                        else: df.at[idx, O] = "TL1"
-
-            # 6. Cấu trúc lại Header và xuất file
-            if has_header:
-                while header_row.shape[1] < df.shape[1]:
-                    header_row[header_row.shape[1]] = ""
-                if pd.isna(header_row.at[0, M]) or header_row.at[0, M] == "": header_row.at[0, M] = "Kết quả M"
-                if pd.isna(header_row.at[0, N]) or header_row.at[0, N] == "": header_row.at[0, N] = "Đánh giá N"
-                if pd.isna(header_row.at[0, O]) or header_row.at[0, O] == "": header_row.at[0, O] = "Phân loại O"
-                df = pd.concat([header_row, df], ignore_index=True)
-
-            name, ext = os.path.splitext(f)
-            out_filename = f"{name}_finish{ext}"
-            out_filepath = os.path.join(folder_path, out_filename)
-            df.to_excel(out_filepath, index=False, header=False)
-            output_files.append(out_filepath)
-            
-    if not output_files: raise ValueError("Không có file Excel nào để xử lý.")
-    if len(output_files) == 1: return output_files[0]
-    
-    zip_path = os.path.join(folder_path, "KetQua_KiemTra_DK.zip")
-    with zipfile.ZipFile(zip_path, 'w') as zipf:
-        for fpath in output_files: zipf.write(fpath, os.path.basename(fpath))
-    return zip_path
-
-# ==========================================
-# CÁC HÀM WRAPPERS KHÁC
-# ==========================================
 def check_khlm_logic(folder_path):
     file_path = os.path.join(folder_path, "Data_SLLM.xlsx")
     if not os.path.exists(file_path): raise ValueError("Không tìm thấy tệp Data_SLLM.xlsx!")
@@ -971,7 +1034,7 @@ def extract_class_names_logic(folder_path):
     return op
 
 # ==========================================
-# MENU SIDEBAR (BỔ SUNG CHỨC NĂNG MỚI)
+# MENU SIDEBAR (BỔ SUNG GOM ĐIỂM UNI)
 # ==========================================
 with st.sidebar:
     st.markdown("<h3 style='color: #1E3A8A; font-weight: 700; margin-top: -15px;'>DATA WORKSPACE</h3>", unsafe_allow_html=True)
@@ -980,7 +1043,8 @@ with st.sidebar:
     menu_options = {
         "Gộp File Nguồn": "Gộp File Nguồn",
         "Tra cứu điểm sinh viên (Cả lớp)": "Tra cứu điểm sinh viên (Cả lớp)", 
-        "Kiểm tra ĐK Đăng ký (Cả lớp)": "Kiểm tra điều kiện đăng ký môn học (Cả lớp)", # CHỨC NĂNG MỚI
+        "Kiểm tra ĐK Đăng ký (Cả lớp)": "Kiểm tra điều kiện đăng ký môn học (Cả lớp)", 
+        "Gom điểm UNI": "Gom điểm UNI", # CHỨC NĂNG MỚI THÊM VÀO THEO YÊU CẦU
         "Điền KHLM (Updated) (*)": "Điền KHLM (Updated) (*)",
         "Kiểm tra KHLM (*)": "Kiểm tra KHLM", 
         "Lọc KQHT Sinh viên": "Lọc kết quả học tập của sinh viên",
@@ -997,7 +1061,7 @@ with st.sidebar:
     choice = menu_options[selected_label]
     
     st.markdown("---")
-    st.caption("Ver 7.0 | Master Edition | Đặng Văn Nghĩa")
+    st.caption("Ver 8.0 | Polars/Rust Integrated")
 
 # ==========================================
 # GIAO DIỆN CHÍNH (SINGLE-SCREEN GRID LAYOUT)
@@ -1011,6 +1075,7 @@ st.markdown(f"""
 
 instructions = {
     "Gộp File Nguồn": "Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa (Mỗi sheet chứa bảng đăng ký).",
+    "Gom điểm UNI": "<b>Trích xuất dữ liệu đa File (Powered by Polars & Rust):</b><br><br><b>1. File MSV:</b> Tải lên file Excel chứa danh sách Mã SV (ở cột đầu tiên) vào ô bên trái.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel cần quét vào khu vực bên phải.<br><br><b>Kết quả:</b> Hệ thống quét vét cạn và trả về file tổng hợp <code>Result.xlsx</code>.",
     "Tra cứu điểm sinh viên (Cả lớp)": "<b>Tự động Scraping EHOU (Headless):</b><br><br><b>File yêu cầu:</b> Excel chuẩn bị sẵn với 2 sheet:<br><b>1. Sheet 'Login':</b> Ô A1 (Tài khoản), Ô B1 (Mật khẩu).<br><b>2. Sheet 'Data':</b> Cột 1 (Tài khoản SV), Các cột sau chứa mã môn học.",
     "Kiểm tra điều kiện đăng ký môn học (Cả lớp)": "<b>Yêu cầu file:</b> Bảng dữ liệu Excel.<br><b>Tùy chọn:</b> Có thể xác định file có chứa dòng tiêu đề hay không.<br><b>Kết quả:</b> Đánh giá điều kiện đạt (YES/NO) và phân loại trạng thái (TL/TL1).",
     "Điền KHLM (Updated) (*)": "<b>Yêu cầu file:</b> <code>Data_fill.xlsx</code><br><br><b>Sheet KHLM:</b> Cần có các cột <code>TenLop</code>, <code>MaMon</code>, <code>DiaPhuongKHL</code>, <code>DiaPhuongHL</code>.<br><b>Sheet Data:</b> Cần có các cột <code>LopLT</code>, <code>MaMon</code>, <code>MaTram</code>, <code>MSV</code>.",
@@ -1036,35 +1101,53 @@ with col_info:
         </div>
     """, unsafe_allow_html=True)
     
-    # Render các option phụ trợ tùy theo chức năng đang chọn
     keywords_str = ""
     has_header = True
+    msv_file = None
     
     if choice == "Điền KHLM (Updated) (*)":
         keywords_str = st.text_input("Thiết lập điều kiện (Từ khóa địa phương):", value="DNP, ĐN ( học tại HCM)")
     elif choice == "Kiểm tra điều kiện đăng ký môn học (Cả lớp)":
         has_header = st.checkbox("Tùy chọn: File chứa dòng tiêu đề (Header row)", value=True)
+    elif choice == "Gom điểm UNI":
+        msv_file = st.file_uploader("📥 Tải lên Danh sách MSV (.xlsx)", type=['xlsx', 'xls', 'xlsb', 'xlsm'])
 
     status_container = st.empty() 
 
 # --- Cột Phải: Uploader & Button Xử lý ---
 with col_action:
-    uploaded_files = st.file_uploader("Kéo thả các file Excel vào đây", accept_multiple_files=True, type=['xlsx', 'xlsb'])
+    uploader_label = "Kéo thả các file Dữ liệu Nguồn vào đây" if choice == "Gom điểm UNI" else "Kéo thả các file Excel vào đây"
+    uploaded_files = st.file_uploader(uploader_label, accept_multiple_files=True, type=['xlsx', 'xlsb', 'xls', 'xlsm'])
     
     if st.button("🚀 XỬ LÝ DỮ LIỆU"):
         if not uploaded_files:
-            st.error("⚠️ Vui lòng tải dữ liệu lên trước!")
+            st.error("⚠️ Vui lòng tải dữ liệu nguồn lên trước!")
+        elif choice == "Gom điểm UNI" and not msv_file:
+            st.error("⚠️ Bạn cần tải lên File Danh sách Mã Sinh Viên trước khi quét vét cạn.")
         else:
             temp_dir = tempfile.mkdtemp()
             try:
-                for uploaded_file in uploaded_files:
-                    with open(os.path.join(temp_dir, uploaded_file.name), "wb") as f:
-                        f.write(uploaded_file.getbuffer())
+                # Xử lý tệp đặc thù cho Gom Điểm UNI
+                if choice == "Gom điểm UNI":
+                    msv_path = os.path.join(temp_dir, "MSV_List.xlsx")
+                    with open(msv_path, "wb") as f:
+                        f.write(msv_file.getbuffer())
+                    
+                    data_dir = os.path.join(temp_dir, "data_source")
+                    os.makedirs(data_dir, exist_ok=True)
+                    for uf in uploaded_files:
+                        with open(os.path.join(data_dir, uf.name), "wb") as f:
+                            f.write(uf.getbuffer())
+                else:
+                    for uploaded_file in uploaded_files:
+                        with open(os.path.join(temp_dir, uploaded_file.name), "wb") as f:
+                            f.write(uploaded_file.getbuffer())
                 
-                with st.spinner('⚙️ Hệ thống đang xử lý...'):
+                with st.spinner('⚙️ Hệ thống đang xử lý, vui lòng giữ trang...'):
                     result_file = None
                     if choice == "Gộp File Nguồn": result_file = process_files_logic(temp_dir)
                     elif choice == "Tra cứu điểm sinh viên (Cả lớp)": result_file = scrape_ehou_logic(temp_dir, status_container)
+                    elif choice == "Gom điểm UNI": result_file = gom_diem_uni_logic(msv_path, data_dir)
                     elif choice == "Kiểm tra điều kiện đăng ký môn học (Cả lớp)": result_file = check_dk_dangky_logic(temp_dir, has_header)
                     elif choice == "Điền KHLM (Updated) (*)": result_file = fill_khlm_logic(temp_dir, keywords_str)
                     elif choice == "Kiểm tra KHLM": result_file = check_khlm_logic(temp_dir)
