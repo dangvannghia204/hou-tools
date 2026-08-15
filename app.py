@@ -356,7 +356,94 @@ def format_excel_date(cell):
 # CÁC HÀM XỬ LÝ (WRAPPERS)
 # ==========================================
 
-# --- CHỨC NĂNG MỚI: GOM ĐIỂM (Khắt khe - Form BGD) ---
+# --- CHỨC NĂNG MỚI: KIỂM TRA TIÊN QUYẾT ---
+def check_tien_quyet_logic(folder_path):
+    ketqua_file = None
+    dktq_file = None
+    for f in os.listdir(folder_path):
+        if f.lower() == 'ketqua.xlsx':
+            ketqua_file = os.path.join(folder_path, f)
+        elif f.lower() == 'dktq.xlsx':
+            dktq_file = os.path.join(folder_path, f)
+
+    if not ketqua_file or not dktq_file:
+        raise ValueError("Không tìm thấy đủ 2 file 'Ketqua.xlsx' và 'dktq.xlsx' trong thư mục đã tải lên!")
+
+    wb_kq = load_workbook(ketqua_file)
+    ws_kq = wb_kq.active
+    b_groups = {}
+    for r in range(2, ws_kq.max_row + 1):
+        cell_d = ws_kq.cell(row=r, column=4).value
+        cell_b = ws_kq.cell(row=r, column=2).value
+        m_val = ""
+        if cell_d is not None:
+            d_str = str(cell_d)
+            if '.' in d_str: m_val = d_str.rsplit('.', 1)[0]
+            else: m_val = d_str
+            ws_kq.cell(row=r, column=13).value = m_val
+
+        if cell_b is not None:
+            b_str = str(cell_b).strip()
+            if b_str not in b_groups:
+                b_groups[b_str] = {'first_row': r, 'm_vals': []}
+            if m_val:
+                b_groups[b_str]['m_vals'].append(m_val)
+
+    n_dict = {}
+    for b_str, data in b_groups.items():
+        m_list = data['m_vals']
+        if m_list: n_val_str = f"{b_str}," + ",".join(m_list)
+        else: n_val_str = b_str
+        ws_kq.cell(row=data['first_row'], column=14).value = n_val_str
+        n_dict[b_str] = {x.strip() for x in n_val_str.split(',') if x.strip()}
+
+    out_kq = os.path.join(folder_path, "Ketqua_Finish.xlsx")
+    wb_kq.save(out_kq)
+
+    wb_dktq = load_workbook(dktq_file)
+    ws_dktq = wb_dktq.active
+    keyword = "Môn tiên quyết chưa hoàn thành "
+
+    for r in range(2, ws_dktq.max_row + 1):
+        cell_m = ws_dktq.cell(row=r, column=13).value
+        cell_d = ws_dktq.cell(row=r, column=4).value
+        d_str = str(cell_d).strip() if cell_d is not None else ""
+        extracted_m = ""
+
+        if cell_m is not None:
+            m_str = str(cell_m)
+            if keyword in m_str:
+                extracted_m = m_str.split(keyword, 1)[1]
+
+        if extracted_m:
+            t_val_str = f"{d_str},{extracted_m}" if d_str else extracted_m
+        else:
+            t_val_str = d_str
+
+        ws_dktq.cell(row=r, column=20).value = t_val_str
+        t_set = {x.strip() for x in t_val_str.split(',') if x.strip()}
+        target_n_set = n_dict.get(d_str, set())
+
+        if t_set and t_set.issubset(target_n_set):
+            ws_dktq.cell(row=r, column=21).value = "CPĐK"
+        else:
+            missing_elements = t_set - target_n_set
+            if missing_elements:
+                ws_dktq.cell(row=r, column=21).value = ", ".join(sorted(list(missing_elements)))
+            else:
+                ws_dktq.cell(row=r, column=21).value = ""
+
+    out_dktq = os.path.join(folder_path, "dktq_Finish.xlsx")
+    wb_dktq.save(out_dktq)
+
+    zip_path = os.path.join(folder_path, "KetQua_KiemTra_TienQuyet.zip")
+    with zipfile.ZipFile(zip_path, 'w') as zipf:
+        zipf.write(out_kq, "Ketqua_Finish.xlsx")
+        zipf.write(out_dktq, "dktq_Finish.xlsx")
+
+    return zip_path
+
+# --- CÁC HÀM CÒN LẠI ---
 def clean_value_gom_diem(val):
     if val is None: return ""
     if isinstance(val, float):
@@ -602,7 +689,6 @@ def gom_diem_logic(msv_path, data_dir):
     else:
         raise ValueError("Quá trình quét kết thúc. Không tìm thấy dữ liệu nào trùng khớp với danh sách TKSV.")
 
-# --- CÁC HÀM CŨ ĐƯỢC GIỮ NGUYÊN (Không thay đổi) ---
 def gom_diem_uni_logic(msv_path, data_dir):
     msv_df = pl.read_excel(msv_path, engine="calamine")
     if len(msv_df.columns) == 0:
@@ -1292,8 +1378,9 @@ with st.sidebar:
         "Gộp File Nguồn": "Gộp File Nguồn",
         "Tra cứu điểm sinh viên (Cả lớp)": "Tra cứu điểm sinh viên (Cả lớp)", 
         "Kiểm tra ĐK Đăng ký (Cả lớp)": "Kiểm tra điều kiện đăng ký môn học (Cả lớp)", 
+        "Kiểm tra tiên quyết": "Kiểm tra tiên quyết", # CHỨC NĂNG MỚI THÊM VÀO
         "Gom điểm UNI": "Gom điểm UNI",
-        "Gom điểm": "Gom điểm", # CHỨC NĂNG MỚI THÊM VÀO
+        "Gom điểm": "Gom điểm",
         "Điền KHLM (Updated) (*)": "Điền KHLM (Updated) (*)",
         "Kiểm tra KHLM (*)": "Kiểm tra KHLM", 
         "Lọc KQHT Sinh viên": "Lọc kết quả học tập của sinh viên",
@@ -1310,7 +1397,7 @@ with st.sidebar:
     choice = menu_options[selected_label]
     
     st.markdown("---")
-    st.caption("Ver 9.0 | Polars/Rust Integrated")
+    st.caption("Ver 10.0 | Master Edition | Đặng Văn Nghĩa")
 
 # ==========================================
 # GIAO DIỆN CHÍNH (SINGLE-SCREEN GRID LAYOUT)
@@ -1328,6 +1415,7 @@ instructions = {
     "Gom điểm": "<b>Trích xuất dữ liệu chuẩn Form BGD & Thường (Powered by Polars & Rust):</b><br><br><b>1. File MSV:</b> Tải lên file chứa danh sách TKSV ở cột 'TKSV'.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel cần quét vét cạn.<br><br><b>Kết quả:</b> Hệ thống tự động lấy điểm, gộp dòng, và xuất file tổng hợp.",
     "Tra cứu điểm sinh viên (Cả lớp)": "<b>Tự động Scraping EHOU (Headless):</b><br><br><b>File yêu cầu:</b> Excel chuẩn bị sẵn với 2 sheet:<br><b>1. Sheet 'Login':</b> Ô A1 (Tài khoản), Ô B1 (Mật khẩu).<br><b>2. Sheet 'Data':</b> Cột 1 (Tài khoản SV), Các cột sau chứa mã môn học.",
     "Kiểm tra điều kiện đăng ký môn học (Cả lớp)": "<b>Yêu cầu file:</b> Bảng dữ liệu Excel.<br><b>Tùy chọn:</b> Có thể xác định file có chứa dòng tiêu đề hay không.<br><b>Kết quả:</b> Đánh giá điều kiện đạt (YES/NO) và phân loại trạng thái (TL/TL1).",
+    "Kiểm tra tiên quyết": "<b>Yêu cầu file:</b> Upload đồng thời 2 file <code>Ketqua.xlsx</code> và <code>dktq.xlsx</code>.<br><br><b>Kết quả:</b> Đối soát môn tiên quyết và trả về file nén chứa <code>Ketqua_Finish.xlsx</code> và <code>dktq_Finish.xlsx</code>.",
     "Điền KHLM (Updated) (*)": "<b>Yêu cầu file:</b> <code>Data_fill.xlsx</code><br><br><b>Sheet KHLM:</b> Cần có các cột <code>TenLop</code>, <code>MaMon</code>, <code>DiaPhuongKHL</code>, <code>DiaPhuongHL</code>.<br><b>Sheet Data:</b> Cần có các cột <code>LopLT</code>, <code>MaMon</code>, <code>MaTram</code>, <code>MSV</code>.",
     "Kiểm tra KHLM": "<b>Yêu cầu file:</b> <code>Data_SLLM.xlsx</code><br><br><b>Sheet Data:</b> Cột D (Lớp), Cột H (Mã môn).<br><b>Sheet ThongKe:</b> Cột A (Lớp), Cột B (Mã môn).<br><br><b>Kết quả:</b> Đối soát lộ trình thiếu kèm với tên môn tương ứng.",
     "Lọc kết quả học tập của sinh viên": "<b>Yêu cầu:</b> <code>Data_Source.xlsx</code> & <code>Data.xlsb</code><br><br><b>Data_Source.xlsx:</b> Sheet 'DSSV', Cột Q (Lớp), Cột J (Mã SV), Cột D (TK SV).<br><b>Data.xlsb:</b> File nhị phân, Cột A (Mã SV).",
@@ -1351,6 +1439,7 @@ with col_info:
         </div>
     """, unsafe_allow_html=True)
     
+    # Render các option phụ trợ tùy theo chức năng đang chọn
     keywords_str = ""
     has_header = True
     msv_file = None
@@ -1396,9 +1485,10 @@ with col_action:
                     result_file = None
                     if choice == "Gộp File Nguồn": result_file = process_files_logic(temp_dir)
                     elif choice == "Tra cứu điểm sinh viên (Cả lớp)": result_file = scrape_ehou_logic(temp_dir, status_container)
+                    elif choice == "Kiểm tra điều kiện đăng ký môn học (Cả lớp)": result_file = check_dk_dangky_logic(temp_dir, has_header)
+                    elif choice == "Kiểm tra tiên quyết": result_file = check_tien_quyet_logic(temp_dir)
                     elif choice == "Gom điểm UNI": result_file = gom_diem_uni_logic(msv_path, data_dir)
                     elif choice == "Gom điểm": result_file = gom_diem_logic(msv_path, data_dir)
-                    elif choice == "Kiểm tra điều kiện đăng ký môn học (Cả lớp)": result_file = check_dk_dangky_logic(temp_dir, has_header)
                     elif choice == "Điền KHLM (Updated) (*)": result_file = fill_khlm_logic(temp_dir, keywords_str)
                     elif choice == "Kiểm tra KHLM": result_file = check_khlm_logic(temp_dir)
                     elif choice == "Lọc kết quả học tập của sinh viên": result_file = compare_data_logic(temp_dir)
