@@ -1395,7 +1395,7 @@ with st.sidebar:
     
     menu_options = {
         "Gộp File Nguồn": "Gộp File Nguồn",
-        "Tra cứu điểm sinh viên (Cả lớp 1*)": "Tra cứu điểm sinh viên (Cả lớp)", 
+        "Tra cứu điểm sinh viên (Cả lớp 1*)": "Tra cứu điểm sinh viên (Cả lớp 1*)", 
         "Kiểm tra ĐK đăng ký (Cả lớp 2*)": "Kiểm tra điều kiện đăng ký môn học (Cả lớp)", 
         "Kiểm tra tiên quyết": "Kiểm tra tiên quyết", 
         "Gom điểm UNI": "Gom điểm UNI",
