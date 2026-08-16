@@ -1412,7 +1412,7 @@ TEMPLATE_BASE_URL = "https://github.com/dangvannghia204/hou-tools/raw/refs/heads
 
 def tpl_link(filename):
     # Loại bỏ target='_blank' và thêm thuộc tính download='{filename}' để trình duyệt tải trực tiếp ngay tại trang
-    return f"<br><a href='{TEMPLATE_BASE_URL}/{filename}' download='{filename}' style='display: inline-block; margin-top: 10px; margin-right: 10px; padding: 6px 12px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 0.85rem;'>📥 Mẫu {filename}</a>"
+    return f"<br><a href='{TEMPLATE_BASE_URL}/{filename}' download='{filename}' style='display: inline-block; margin-top: 10px; margin-right: 10px; padding: 6px 12px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 0.85rem;'>📥 File Mẫu: {filename}</a>"
 
 instructions = {
     "Gộp File Nguồn": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa (Mỗi sheet chứa bảng đăng ký).{tpl_link('GK300_Template.xlsx')}",
