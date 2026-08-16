@@ -1505,8 +1505,8 @@ with col_action:
                 with st.spinner('⚙️ Hệ thống đang xử lý, vui lòng giữ trang...'):
                     result_file = None
                     if choice == "Gộp File Nguồn": result_file = process_files_logic(temp_dir)
-                    elif choice == "Tra cứu điểm sinh viên (Cả lớp)": result_file = scrape_ehou_logic(temp_dir, status_container)
-                    elif choice == "Kiểm tra điều kiện đăng ký môn học (Cả lớp)": result_file = check_dk_dangky_logic(temp_dir, has_header)
+                    elif choice == "Tra cứu điểm sinh viên (Cả lớp 1*)": result_file = scrape_ehou_logic(temp_dir, status_container)
+                    elif choice == "Kiểm tra điều kiện đăng ký môn học (Cả lớp 2*)": result_file = check_dk_dangky_logic(temp_dir, has_header)
                     elif choice == "Kiểm tra tiên quyết": result_file = check_tien_quyet_logic(temp_dir)
                     elif choice == "Gom điểm UNI": result_file = gom_diem_uni_logic(msv_path, data_dir)
                     elif choice == "Gom điểm": result_file = gom_diem_logic(msv_path, data_dir)
