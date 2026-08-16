@@ -1374,7 +1374,7 @@ with st.sidebar:
     menu_options = {
         "Gộp File Nguồn": "Gộp File Nguồn",
         "Tra cứu điểm sinh viên (Cả lớp 1*)": "Tra cứu điểm sinh viên (Cả lớp)", 
-        "Kiểm tra ĐK đăng ký (Cả lớp 2**)": "Kiểm tra điều kiện đăng ký môn học (Cả lớp)", 
+        "Kiểm tra ĐK đăng ký (Cả lớp 2*)": "Kiểm tra điều kiện đăng ký môn học (Cả lớp)", 
         "Kiểm tra tiên quyết": "Kiểm tra tiên quyết", 
         "Gom điểm UNI": "Gom điểm UNI",
         "Gom điểm": "Gom điểm", 
@@ -1408,7 +1408,7 @@ st.markdown(f"""
 
 # THIẾT LẬP ĐƯỜNG DẪN GITHUB TẠI ĐÂY 
 # MẸO: Sử dụng tiền tố "raw.githubusercontent.com" thay vì "github.com" để link tải thẳng về máy không qua trang trung gian.
-TEMPLATE_BASE_URL = "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/Template"
+TEMPLATE_BASE_URL = "https://raw.githubusercontent.com/dangvannghia204/hou-tools/blob/main/templates"
 
 def tpl_link(filename):
     # Loại bỏ target='_blank' và thêm thuộc tính download='{filename}' để trình duyệt tải trực tiếp ngay tại trang
