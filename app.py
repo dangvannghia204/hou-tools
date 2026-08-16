@@ -848,6 +848,7 @@ def check_dk_dangky_logic(folder_path, has_header):
         for fpath in output_files: zipf.write(fpath, os.path.basename(fpath))
     return zip_path
 
+# --- HÀM TRA CỨU ĐIỂM SINH VIÊN ĐÃ ĐƯỢC CẬP NHẬT LẠI ---
 def scrape_ehou_logic(folder_path, status_placeholder=None):
     from selenium import webdriver
     from selenium.webdriver.common.by import By
@@ -881,24 +882,16 @@ def scrape_ehou_logic(folder_path, status_placeholder=None):
     if 'Login' not in xls.sheet_names or 'Data' not in xls.sheet_names:
         raise ValueError("File Excel phải chứa đúng 2 sheet: 'Login' và 'Data'.")
 
-    # Đọc an toàn sheet Login không phụ thuộc dòng Header cố định
-    df_login = pd.read_excel(xls, sheet_name='Login', header=None)
+    df_login = pd.read_excel(xls, sheet_name='Login')
     if df_login.empty or df_login.shape[1] < 2:
-        raise ValueError("Sheet 'Login' không có dữ liệu tài khoản/mật khẩu ở Cột A và B.")
+        raise ValueError("Sheet 'Login' trống hoặc thiếu cột Dữ liệu.")
     
-    first_cell = str(df_login.iloc[0, 0]).lower()
-    if "user" in first_cell or "tài khoản" in first_cell or "tk" in first_cell:
-        if df_login.shape[0] < 2:
-            raise ValueError("Sheet 'Login' chỉ có tiêu đề mà không có dữ liệu thật.")
-        username = str(df_login.iloc[1, 0]).strip().lstrip("'")
-        password_raw = str(df_login.iloc[1, 1]).strip().lstrip("'")
-    else:
-        username = str(df_login.iloc[0, 0]).strip().lstrip("'")
-        password_raw = str(df_login.iloc[0, 1]).strip().lstrip("'")
-    
+    username = str(df_login.iloc[0, 0]).strip().lstrip("'")
+    password_raw = str(df_login.iloc[0, 1]).strip().lstrip("'")
     password = password_raw.strip("/") 
+    
     if not username or username == 'nan':
-        raise ValueError("Tài khoản trong Sheet 'Login' trống.")
+        raise ValueError("Không đọc được Tài khoản trong Sheet 'Login'. Hãy đảm bảo điền Account ở ô A2, Password ô B2.")
     
     df_data = pd.read_excel(xls, sheet_name='Data', dtype=str)
     total_rows = len(df_data)
@@ -917,7 +910,7 @@ def scrape_ehou_logic(folder_path, status_placeholder=None):
     try:
         driver = webdriver.Chrome(options=options)
     except Exception as e:
-        raise RuntimeError(f"Không thể khởi chạy trình duyệt ngầm. Vui lòng đảm bảo hệ thống đã cài đặt Chromium và ChromeDriver.\nChi tiết lỗi: {e}")
+        raise RuntimeError(f"Lỗi khởi chạy môi trường duyệt web ẩn. Hãy đảm bảo Server có 'chromium' và 'chromium-driver'.\nChi tiết: {e}")
 
     wait = WebDriverWait(driver, 25) 
 
@@ -936,9 +929,10 @@ def scrape_ehou_logic(folder_path, status_placeholder=None):
 
         time.sleep(5) 
         
+        data_processed = False
+
         for start_idx in range(0, total_rows, batch_size):
             end_idx = min(start_idx + batch_size, total_rows)
-            if status_placeholder: status_placeholder.info(f"🔎 Đang tra cứu dữ liệu: Lô từ dòng {start_idx + 1} đến {end_idx}...")
             
             chunk = df_data.iloc[start_idx:end_idx] 
             chunk_accounts = []
@@ -956,6 +950,8 @@ def scrape_ehou_logic(folder_path, status_placeholder=None):
                         chunk_courses.append(course_val)
                         
             if not chunk_accounts: continue
+            data_processed = True
+            if status_placeholder: status_placeholder.info(f"🔎 Đang tra cứu dữ liệu: Lô từ dòng {start_idx + 1} đến {end_idx}...")
                 
             account_str_to_paste = " ".join(chunk_accounts)
             course_str_to_paste = " ".join(chunk_courses)
@@ -1047,7 +1043,7 @@ def scrape_ehou_logic(folder_path, status_placeholder=None):
                 if df_result is None or df_result.empty:
                     body_text = driver.find_element(By.TAG_NAME, "body").text
                     if "Apereo" in body_text and "Username" in body_text:
-                        raise Exception("BỊ VĂNG KHỎI PHIÊN ĐĂNG NHẬP (Session Timeout)")
+                        raise Exception("BỊ VĂNG KHỎI TÀI KHOẢN (Session Timeout)")
                     
                     df_result = pd.DataFrame([{
                         "Học viên": f"Lô dòng {start_idx + 1} - {end_idx}", 
@@ -1069,13 +1065,16 @@ def scrape_ehou_logic(folder_path, status_placeholder=None):
                 if not os.path.exists(temp_csv_path): df_err.to_csv(temp_csv_path, index=False, mode='w', encoding='utf-8-sig')
                 else: df_err.to_csv(temp_csv_path, index=False, mode='a', header=False, encoding='utf-8-sig')
         
+        if not data_processed:
+            raise ValueError("File Excel có Sheet Data nhưng dữ liệu trống hoặc sai chuẩn (thiếu Tài khoản ở Cột đầu tiên).")
+
         if os.path.exists(temp_csv_path):
             final_df = pd.read_csv(temp_csv_path)
             final_df.to_excel(result_path, sheet_name="Ket_Qua_Tong_Hop", index=False, engine='openpyxl')
             os.remove(temp_csv_path) 
             return result_path
         else:
-            raise ValueError("Quá trình quét kết thúc nhưng không có dữ liệu để lưu. Hãy đảm bảo Sheet 'Data' có Tài khoản và Mã môn hợp lệ.")
+            raise ValueError("Quá trình quét kết thúc nhưng không có dữ liệu để xuất file.")
 
     finally:
         if driver: driver.quit()
@@ -1396,8 +1395,8 @@ with st.sidebar:
     
     menu_options = {
         "Gộp File Nguồn": "Gộp File Nguồn",
-        "Tra cứu điểm sinh viên (Cả lớp 1*)": "Tra cứu điểm sinh viên (Cả lớp 1*)", 
-        "Kiểm tra ĐK Đăng ký (Cả lớp 2*)": "Kiểm tra điều kiện đăng ký môn học (Cả lớp 2*)", 
+        "Tra cứu điểm sinh viên (Cả lớp)": "Tra cứu điểm sinh viên (Cả lớp)", 
+        "Kiểm tra ĐK Đăng ký (Cả lớp)": "Kiểm tra điều kiện đăng ký môn học (Cả lớp)", 
         "Kiểm tra tiên quyết": "Kiểm tra tiên quyết", 
         "Gom điểm UNI": "Gom điểm UNI",
         "Gom điểm": "Gom điểm", 
@@ -1417,7 +1416,7 @@ with st.sidebar:
     choice = menu_options[selected_label]
     
     st.markdown("---")
-    st.caption("Ver 10.2 | Seamless Download Edition")
+    st.caption("Ver 10.3 | Bug Fix Edition")
 
 # ==========================================
 # GIAO DIỆN CHÍNH (SINGLE-SCREEN GRID LAYOUT)
@@ -1429,19 +1428,17 @@ st.markdown(f"""
     </div>
 """, unsafe_allow_html=True)
 
-# THIẾT LẬP ĐƯỜNG DẪN GITHUB TẠI ĐÂY 
-# ĐÃ SỬ DỤNG 'raw.githubusercontent.com' ĐỂ TRÌNH DUYỆT TỰ ĐỘNG TẢI FILE VỀ THAY VÌ MỞ TAB MỚI
-TEMPLATE_BASE_URL = "https://github.com/dangvannghia204/hou-tools/raw/refs/heads/main/templates"
+TEMPLATE_BASE_URL = "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/Template"
 
 def tpl_link(filename):
-    return f"<br><a href='{TEMPLATE_BASE_URL}/{filename}' download='{filename}' style='display: inline-block; margin-top: 10px; margin-right: 10px; padding: 6px 12px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 0.85rem;'>📥 File mẫu: {filename}</a>"
+    return f"<br><a href='{TEMPLATE_BASE_URL}/{filename}' download='{filename}' style='display: inline-block; margin-top: 10px; margin-right: 10px; padding: 6px 12px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 0.85rem;'>📥 Tải Mẫu {filename}</a>"
 
 instructions = {
     "Gộp File Nguồn": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa (Mỗi sheet chứa bảng đăng ký).{tpl_link('GK300_Template.xlsx')}",
     "Gom điểm UNI": f"<b>Trích xuất dữ liệu đa File (Powered by Polars & Rust):</b><br><br><b>1. File MSV:</b> Tải lên file Excel chứa danh sách Mã SV (ở cột đầu tiên) vào ô bên trái.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel cần quét vào khu vực bên phải.<br><br><b>Kết quả:</b> Hệ thống quét vét cạn và trả về file tổng hợp <code>Result.xlsx</code>.{tpl_link('MSV_List_Template.xlsx')}",
     "Gom điểm": f"<b>Trích xuất dữ liệu chuẩn Form BGD & Thường (Powered by Polars & Rust):</b><br><br><b>1. File MSV:</b> Tải lên file chứa danh sách TKSV ở cột 'TKSV'.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel cần quét vét cạn.<br><br><b>Kết quả:</b> Hệ thống tự động lấy điểm, gộp dòng, và xuất file tổng hợp.{tpl_link('MSV_List_Template.xlsx')}",
-    "Tra cứu điểm sinh viên (Cả lớp 1*)": f"<b>Tự động Scraping EHOU (Headless):</b><br><br><b>File yêu cầu:</b> Excel chuẩn bị sẵn với 2 sheet:<br><b>1. Sheet 'Login':</b> Ô A1 (Tài khoản), Ô B1 (Mật khẩu).<br><b>2. Sheet 'Data':</b> Cột 1 (Tài khoản SV), Các cột sau chứa mã môn học.{tpl_link('TraCuuDiem_Template.xlsx')}",
-    "Kiểm tra điều kiện đăng ký môn học (Cả lớp 2*)": f"<b>Yêu cầu file:</b> Sử dụng kết quả từ chức năng: Tra cứu điểm sinh viên (Cả lớp 1*).<br><b>Tùy chọn:</b> Có thể xác định file có chứa dòng tiêu đề hay không.<br><b>Kết quả:</b> Đánh giá điều kiện đạt (YES/NO) và phân loại trạng thái (TL/TL1).",
+    "Tra cứu điểm sinh viên (Cả lớp)": f"<b>Tự động Scraping EHOU (Headless):</b><br><br><b>File yêu cầu:</b> Excel chuẩn bị sẵn với 2 sheet:<br><b>1. Sheet 'Login':</b> Ô A1 (Tài khoản), Ô B1 (Mật khẩu).<br><b>2. Sheet 'Data':</b> Cột 1 (Tài khoản SV), Các cột sau chứa mã môn học.{tpl_link('TraCuuDiem_Template.xlsx')}",
+    "Kiểm tra điều kiện đăng ký môn học (Cả lớp)": f"<b>Yêu cầu file:</b> Bảng dữ liệu Excel.<br><b>Tùy chọn:</b> Có thể xác định file có chứa dòng tiêu đề hay không.<br><b>Kết quả:</b> Đánh giá điều kiện đạt (YES/NO) và phân loại trạng thái (TL/TL1).{tpl_link('KiemTraDK_Template.xlsx')}",
     "Kiểm tra tiên quyết": f"<b>Yêu cầu file:</b> Upload đồng thời 2 file <code>Ketqua.xlsx</code> và <code>dktq.xlsx</code>.<br><br><b>Kết quả:</b> Đối soát môn tiên quyết và trả về file nén chứa <code>Ketqua_Finish.xlsx</code> và <code>dktq_Finish.xlsx</code>.{tpl_link('Ketqua_Template.xlsx')}{tpl_link('dktq_Template.xlsx')}",
     "Điền KHLM (Updated) (*)": f"<b>Yêu cầu file:</b> <code>Data_fill.xlsx</code><br><br><b>Sheet KHLM:</b> Cần có các cột <code>TenLop</code>, <code>MaMon</code>, <code>DiaPhuongKHL</code>, <code>DiaPhuongHL</code>.<br><b>Sheet Data:</b> Cần có các cột <code>LopLT</code>, <code>MaMon</code>, <code>MaTram</code>, <code>MSV</code>.{tpl_link('Data_fill_Template.xlsx')}",
     "Kiểm tra KHLM": f"<b>Yêu cầu file:</b> <code>Data_SLLM.xlsx</code><br><br><b>Sheet Data:</b> Cột D (Lớp), Cột H (Mã môn).<br><b>Sheet ThongKe:</b> Cột A (Lớp), Cột B (Mã môn).<br><br><b>Kết quả:</b> Đối soát lộ trình thiếu kèm với tên môn tương ứng.{tpl_link('Data_SLLM_Template.xlsx')}",
@@ -1457,7 +1454,6 @@ instructions = {
 
 col_info, col_action = st.columns([1.1, 1], gap="medium")
 
-# --- Cột Trái: Thông tin Hướng dẫn & Cấu hình ---
 with col_info:
     st.markdown(f"""
         <div class="instruction-card">
@@ -1466,7 +1462,6 @@ with col_info:
         </div>
     """, unsafe_allow_html=True)
     
-    # Render các option phụ trợ tùy theo chức năng đang chọn
     keywords_str = ""
     has_header = True
     msv_file = None
@@ -1480,7 +1475,6 @@ with col_info:
 
     status_container = st.empty() 
 
-# --- Cột Phải: Uploader & Button Xử lý ---
 with col_action:
     uploader_label = "Kéo thả các file Dữ liệu Nguồn vào đây" if choice in ["Gom điểm UNI", "Gom điểm"] else "Kéo thả các file Excel vào đây"
     uploaded_files = st.file_uploader(uploader_label, accept_multiple_files=True, type=['xlsx', 'xlsb', 'xls', 'xlsm'])
