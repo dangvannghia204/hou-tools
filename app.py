@@ -1553,7 +1553,6 @@ with col_action:
 
                     if result_file and os.path.exists(result_file):
                         status_container.empty()
-                        st.toast('Xử lý thành công!', icon='✅')
                         with open(result_file, "rb") as f:
                             file_data = f.read()
                         
