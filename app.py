@@ -120,7 +120,8 @@ class ExcelDataProcessor:
         actual_khlm = next((s for s in wb.sheetnames if s.lower() == 'khlm'), None)
         if not actual_khlm: return
 
-        df_khlm = pd.read_excel(self.input_file, sheet_name=actual_khlm)
+        # Ép kiểu object toàn cục để khắc phục triệt để lỗi dtype float64 khi ô rỗng
+        df_khlm = pd.read_excel(self.input_file, sheet_name=actual_khlm).astype(object)
         cols = df_khlm.columns.tolist()
         col_map = {str(c).strip().upper(): c for c in cols}
         keywords = [k.strip().upper() for k in self.keywords_str.split(',') if k.strip()]
@@ -163,7 +164,8 @@ class ExcelDataProcessor:
         actual_data = next((s for s in xls.sheet_names if s.lower() == 'data'), None)
         if not actual_khlm or not actual_data: return
 
-        khlm = pd.read_excel(self.input_file, sheet_name=actual_khlm, header=0)
+        # Ép kiểu object để trị tận gốc lỗi ValueError: Invalid value ... for dtype float64
+        khlm = pd.read_excel(self.input_file, sheet_name=actual_khlm, header=0).astype(object)
         data = pd.read_excel(self.input_file, sheet_name=actual_data)
 
         idx_tenlop = self._get_col_idx(khlm, 'TenLop', 'TenLop')
@@ -848,7 +850,6 @@ def check_dk_dangky_logic(folder_path, has_header):
         for fpath in output_files: zipf.write(fpath, os.path.basename(fpath))
     return zip_path
 
-# --- HÀM TRA CỨU ĐIỂM SINH VIÊN ĐÃ ĐƯỢC CẬP NHẬT LẠI ---
 def scrape_ehou_logic(folder_path, status_placeholder=None):
     from selenium import webdriver
     from selenium.webdriver.common.by import By
@@ -882,14 +883,21 @@ def scrape_ehou_logic(folder_path, status_placeholder=None):
     if 'Login' not in xls.sheet_names or 'Data' not in xls.sheet_names:
         raise ValueError("File Excel phải chứa đúng 2 sheet: 'Login' và 'Data'.")
 
-    df_login = pd.read_excel(xls, sheet_name='Login')
+    df_login = pd.read_excel(xls, sheet_name='Login', header=None)
     if df_login.empty or df_login.shape[1] < 2:
         raise ValueError("Sheet 'Login' trống hoặc thiếu cột Dữ liệu.")
     
-    username = str(df_login.iloc[0, 0]).strip().lstrip("'")
-    password_raw = str(df_login.iloc[0, 1]).strip().lstrip("'")
-    password = password_raw.strip("/") 
+    first_cell = str(df_login.iloc[0, 0]).lower()
+    if "user" in first_cell or "tài khoản" in first_cell or "tk" in first_cell:
+        if df_login.shape[0] < 2:
+            raise ValueError("Sheet 'Login' chỉ có tiêu đề mà không có dữ liệu thật.")
+        username = str(df_login.iloc[1, 0]).strip().lstrip("'")
+        password_raw = str(df_login.iloc[1, 1]).strip().lstrip("'")
+    else:
+        username = str(df_login.iloc[0, 0]).strip().lstrip("'")
+        password_raw = str(df_login.iloc[0, 1]).strip().lstrip("'")
     
+    password = password_raw.strip("/") 
     if not username or username == 'nan':
         raise ValueError("Không đọc được Tài khoản trong Sheet 'Login'. Hãy đảm bảo điền Account ở ô A2, Password ô B2.")
     
@@ -1395,8 +1403,8 @@ with st.sidebar:
     
     menu_options = {
         "Gộp File Nguồn": "Gộp File Nguồn",
-        "Tra cứu điểm sinh viên (Cả lớp 1*)": "Tra cứu điểm sinh viên (Cả lớp)", 
-        "Kiểm tra ĐK đăng ký (Cả lớp 2*)": "Kiểm tra điều kiện đăng ký môn học (Cả lớp)", 
+        "Tra cứu điểm sinh viên (Cả lớp)": "Tra cứu điểm sinh viên (Cả lớp)", 
+        "Kiểm tra ĐK Đăng ký (Cả lớp)": "Kiểm tra điều kiện đăng ký môn học (Cả lớp)", 
         "Kiểm tra tiên quyết": "Kiểm tra tiên quyết", 
         "Gom điểm UNI": "Gom điểm UNI",
         "Gom điểm": "Gom điểm", 
@@ -1428,17 +1436,17 @@ st.markdown(f"""
     </div>
 """, unsafe_allow_html=True)
 
-TEMPLATE_BASE_URL = "https://github.com/dangvannghia204/hou-tools/raw/refs/heads/main/templates"
+TEMPLATE_BASE_URL = "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/Template"
 
 def tpl_link(filename):
-    return f"<br><a href='{TEMPLATE_BASE_URL}/{filename}' download='{filename}' style='display: inline-block; margin-top: 10px; margin-right: 10px; padding: 6px 12px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 0.85rem;'>📥 File Mẫu: {filename}</a>"
+    return f"<br><a href='{TEMPLATE_BASE_URL}/{filename}' download='{filename}' style='display: inline-block; margin-top: 10px; margin-right: 10px; padding: 6px 12px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 0.85rem;'>📥 Tải Mẫu {filename}</a>"
 
 instructions = {
-    "Gộp File Nguồn": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa (Mỗi sheet chứa bảng đăng ký).",
-    "Gom điểm UNI": f"<b>Trích xuất dữ liệu đa File (Powered by Polars & Rust):</b><br><b>1. File MSV:</b> Tải lên file Excel chứa danh sách Mã SV (ở cột đầu tiên) vào ô bên trái.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel cần quét vào khu vực bên phải.<br><b>Kết quả:</b> Hệ thống quét vét cạn và trả về file tổng hợp <code>Result.xlsx</code>.{tpl_link('TKSV_Template.xlsx')}",
-    "Gom điểm": f"<b>Trích xuất dữ liệu chuẩn Form BGD & Thường (Powered by Polars & Rust):</b><br><b>1. File MSV:</b> Tải lên file chứa danh sách TKSV ở cột 'TKSV'.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel cần quét vét cạn.<br><b>Kết quả:</b> Hệ thống tự động lấy điểm, gộp dòng, và xuất file tổng hợp.{tpl_link('TKSV_Template.xlsx')}",
+    "Gộp File Nguồn": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa (Mỗi sheet chứa bảng đăng ký).{tpl_link('GK300_Template.xlsx')}",
+    "Gom điểm UNI": f"<b>Trích xuất dữ liệu đa File (Powered by Polars & Rust):</b><br><br><b>1. File MSV:</b> Tải lên file Excel chứa danh sách Mã SV (ở cột đầu tiên) vào ô bên trái.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel cần quét vào khu vực bên phải.<br><br><b>Kết quả:</b> Hệ thống quét vét cạn và trả về file tổng hợp <code>Result.xlsx</code>.{tpl_link('MSV_List_Template.xlsx')}",
+    "Gom điểm": f"<b>Trích xuất dữ liệu chuẩn Form BGD & Thường (Powered by Polars & Rust):</b><br><br><b>1. File MSV:</b> Tải lên file chứa danh sách TKSV ở cột 'TKSV'.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel cần quét vét cạn.<br><br><b>Kết quả:</b> Hệ thống tự động lấy điểm, gộp dòng, và xuất file tổng hợp.{tpl_link('MSV_List_Template.xlsx')}",
     "Tra cứu điểm sinh viên (Cả lớp)": f"<b>Tự động Scraping EHOU (Headless):</b><br><br><b>File yêu cầu:</b> Excel chuẩn bị sẵn với 2 sheet:<br><b>1. Sheet 'Login':</b> Ô A1 (Tài khoản), Ô B1 (Mật khẩu).<br><b>2. Sheet 'Data':</b> Cột 1 (Tài khoản SV), Các cột sau chứa mã môn học.{tpl_link('TraCuuDiem_Template.xlsx')}",
-    "Kiểm tra điều kiện đăng ký môn học (Cả lớp)": f"<b>Yêu cầu file:</b> Sử dụng kết quả: Tra cứu điểm sinh viên (Cả lớp 1*).<br><b>Tùy chọn:</b> Có thể xác định file có chứa dòng tiêu đề hay không.<br><b>Kết quả:</b> Đánh giá điều kiện đạt (YES/NO) và phân loại trạng thái (TL/TL1).",
+    "Kiểm tra điều kiện đăng ký môn học (Cả lớp)": f"<b>Yêu cầu file:</b> Bảng dữ liệu Excel.<br><b>Tùy chọn:</b> Có thể xác định file có chứa dòng tiêu đề hay không.<br><b>Kết quả:</b> Đánh giá điều kiện đạt (YES/NO) và phân loại trạng thái (TL/TL1).{tpl_link('KiemTraDK_Template.xlsx')}",
     "Kiểm tra tiên quyết": f"<b>Yêu cầu file:</b> Upload đồng thời 2 file <code>Ketqua.xlsx</code> và <code>dktq.xlsx</code>.<br><br><b>Kết quả:</b> Đối soát môn tiên quyết và trả về file nén chứa <code>Ketqua_Finish.xlsx</code> và <code>dktq_Finish.xlsx</code>.{tpl_link('Ketqua_Template.xlsx')}{tpl_link('dktq_Template.xlsx')}",
     "Điền KHLM (Updated) (*)": f"<b>Yêu cầu file:</b> <code>Data_fill.xlsx</code><br><br><b>Sheet KHLM:</b> Cần có các cột <code>TenLop</code>, <code>MaMon</code>, <code>DiaPhuongKHL</code>, <code>DiaPhuongHL</code>.<br><b>Sheet Data:</b> Cần có các cột <code>LopLT</code>, <code>MaMon</code>, <code>MaTram</code>, <code>MSV</code>.{tpl_link('Data_fill_Template.xlsx')}",
     "Kiểm tra KHLM": f"<b>Yêu cầu file:</b> <code>Data_SLLM.xlsx</code><br><br><b>Sheet Data:</b> Cột D (Lớp), Cột H (Mã môn).<br><b>Sheet ThongKe:</b> Cột A (Lớp), Cột B (Mã môn).<br><br><b>Kết quả:</b> Đối soát lộ trình thiếu kèm với tên môn tương ứng.{tpl_link('Data_SLLM_Template.xlsx')}",
