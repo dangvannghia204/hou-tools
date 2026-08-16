@@ -355,8 +355,6 @@ def format_excel_date(cell):
 # ==========================================
 # CÁC HÀM XỬ LÝ (WRAPPERS)
 # ==========================================
-
-# --- CHỨC NĂNG MỚI: KIỂM TRA TIÊN QUYẾT ---
 def check_tien_quyet_logic(folder_path):
     ketqua_file = None
     dktq_file = None
@@ -443,7 +441,6 @@ def check_tien_quyet_logic(folder_path):
 
     return zip_path
 
-# --- CÁC HÀM CÒN LẠI ---
 def clean_value_gom_diem(val):
     if val is None: return ""
     if isinstance(val, float):
@@ -1377,10 +1374,10 @@ with st.sidebar:
     menu_options = {
         "Gộp File Nguồn": "Gộp File Nguồn",
         "Tra cứu điểm sinh viên (Cả lớp 1*)": "Tra cứu điểm sinh viên (Cả lớp)", 
-        "Kiểm tra ĐK đăng ký (Cả lớp 2*)": "Kiểm tra điều kiện đăng ký môn học (Cả lớp)", 
-        "Kiểm tra tiên quyết": "Kiểm tra tiên quyết", # CHỨC NĂNG MỚI THÊM VÀO
+        "Kiểm tra ĐK đăng ký (Cả lớp 2**)": "Kiểm tra điều kiện đăng ký môn học (Cả lớp)", 
+        "Kiểm tra tiên quyết": "Kiểm tra tiên quyết", 
         "Gom điểm UNI": "Gom điểm UNI",
-        "Gom điểm": "Gom điểm",
+        "Gom điểm": "Gom điểm", 
         "Điền KHLM (Updated) (*)": "Điền KHLM (Updated) (*)",
         "Kiểm tra KHLM (*)": "Kiểm tra KHLM", 
         "Lọc KQHT Sinh viên": "Lọc kết quả học tập của sinh viên",
@@ -1397,7 +1394,7 @@ with st.sidebar:
     choice = menu_options[selected_label]
     
     st.markdown("---")
-    st.caption("Ver 10.0 | Master Edition | Đặng Văn Nghĩa")
+    st.caption("Ver 10.1 | Templates Integrated")
 
 # ==========================================
 # GIAO DIỆN CHÍNH (SINGLE-SCREEN GRID LAYOUT)
@@ -1409,23 +1406,29 @@ st.markdown(f"""
     </div>
 """, unsafe_allow_html=True)
 
+# THIẾT LẬP ĐƯỜNG DẪN GITHUB TẠI ĐÂY
+TEMPLATE_BASE_URL = "https://github.com/YOUR_USERNAME/YOUR_REPO/raw/main/Template"
+
+def tpl_link(filename):
+    return f"<br><a href='{TEMPLATE_BASE_URL}/{filename}' target='_blank' style='display: inline-block; margin-top: 10px; margin-right: 10px; padding: 6px 12px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 0.85rem;'>📥 Mẫu {filename}</a>"
+
 instructions = {
-    "Gộp File Nguồn": "Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa (Mỗi sheet chứa bảng đăng ký).",
-    "Gom điểm UNI": "<b>Trích xuất dữ liệu đa File (Powered by Polars & Rust):</b><br><br><b>1. File MSV:</b> Tải lên file Excel chứa danh sách Mã SV (ở cột đầu tiên) vào ô bên trái.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel cần quét vào khu vực bên phải.<br><br><b>Kết quả:</b> Hệ thống quét vét cạn và trả về file tổng hợp <code>Result.xlsx</code>.",
-    "Gom điểm": "<b>Trích xuất dữ liệu chuẩn Form BGD & Thường (Powered by Polars & Rust):</b><br><br><b>1. File MSV:</b> Tải lên file chứa danh sách TKSV ở cột 'TKSV'.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel cần quét vét cạn.<br><br><b>Kết quả:</b> Hệ thống tự động lấy điểm, gộp dòng, và xuất file tổng hợp.",
-    "Tra cứu điểm sinh viên (Cả lớp)": "<b>Tự động Scraping EHOU (Headless):</b><br><br><b>File yêu cầu:</b> Excel chuẩn bị sẵn với 2 sheet:<br><b>1. Sheet 'Login':</b> Ô A1 (Tài khoản), Ô B1 (Mật khẩu).<br><b>2. Sheet 'Data':</b> Cột 1 (Tài khoản SV), Các cột sau chứa mã môn học.",
-    "Kiểm tra điều kiện đăng ký môn học (Cả lớp)": "<b>Yêu cầu file:</b> Bảng dữ liệu Excel.<br><b>Tùy chọn:</b> Có thể xác định file có chứa dòng tiêu đề hay không.<br><b>Kết quả:</b> Đánh giá điều kiện đạt (YES/NO) và phân loại trạng thái (TL/TL1).",
-    "Kiểm tra tiên quyết": "<b>Yêu cầu file:</b> Upload đồng thời 2 file <code>Ketqua.xlsx</code> và <code>dktq.xlsx</code>.<br><br><b>Kết quả:</b> Đối soát môn tiên quyết và trả về file nén chứa <code>Ketqua_Finish.xlsx</code> và <code>dktq_Finish.xlsx</code>.",
-    "Điền KHLM (Updated) (*)": "<b>Yêu cầu file:</b> <code>Data_fill.xlsx</code><br><br><b>Sheet KHLM:</b> Cần có các cột <code>TenLop</code>, <code>MaMon</code>, <code>DiaPhuongKHL</code>, <code>DiaPhuongHL</code>.<br><b>Sheet Data:</b> Cần có các cột <code>LopLT</code>, <code>MaMon</code>, <code>MaTram</code>, <code>MSV</code>.",
-    "Kiểm tra KHLM": "<b>Yêu cầu file:</b> <code>Data_SLLM.xlsx</code><br><br><b>Sheet Data:</b> Cột D (Lớp), Cột H (Mã môn).<br><b>Sheet ThongKe:</b> Cột A (Lớp), Cột B (Mã môn).<br><br><b>Kết quả:</b> Đối soát lộ trình thiếu kèm với tên môn tương ứng.",
-    "Lọc kết quả học tập của sinh viên": "<b>Yêu cầu:</b> <code>Data_Source.xlsx</code> & <code>Data.xlsb</code><br><br><b>Data_Source.xlsx:</b> Sheet 'DSSV', Cột Q (Lớp), Cột J (Mã SV), Cột D (TK SV).<br><b>Data.xlsb:</b> File nhị phân, Cột A (Mã SV).",
-    "Lọc sinh viên học lại & học cải thiện": "<b>Yêu cầu:</b> <code>Data_Source.xlsx</code> & <code>DanhSachDangKy.xlsx</code><br><br><b>DanhSachDangKy.xlsx:</b> Sheet 'Dangky: B,C,T' và 'Danghoc: B,G,O', Cột B (TK SV), Cột C&G (Mã môn), Cột T&O (Số TC).",
-    "Xuất Mã lớp theo GK300": "Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa.",
-    "Xuất KHHT theo GK300 (1*)": "Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa.",
-    "Xuất DSSV theo GK300 (2*)": "<b>Yêu cầu:</b> <code>Merged_GK300.xlsx</code> tạo từ (1*) & <code>Data_Source.xlsx</code><br><b>Merged_GK300.xlsx:</b> Sheet 'KHHT_GK300', Cột L(12) là Mã LT.",
-    "Xuất KHHTCT theo GK300 (3*)": "<b>Yêu cầu:</b> Cần cung cấp file <code>Merged_GK300.xlsx</code>.",
-    "Thống kê số lượng theo lớp/nhóm lớp & môn (*)": "<b>Yêu cầu:</b> File <code>Data_SLLM.xlsx</code><br><b>Sheet Data:</b> Cột L (Mã trạm).<br><b>Sheet ThongKe:</b> Cột A (Tên lớp), B (Mã môn), Tiêu đề Cột C (Mã Trạm).",
-    "Xuất môn theo ngành học (*)": "Đầu vào là file dữ liệu môn học phân bổ theo ngành và theo khóa."
+    "Gộp File Nguồn": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa (Mỗi sheet chứa bảng đăng ký).{tpl_link('GK300_Template.xlsx')}",
+    "Gom điểm UNI": f"<b>Trích xuất dữ liệu đa File (Powered by Polars & Rust):</b><br><br><b>1. File MSV:</b> Tải lên file Excel chứa danh sách Mã SV (ở cột đầu tiên) vào ô bên trái.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel cần quét vào khu vực bên phải.<br><br><b>Kết quả:</b> Hệ thống quét vét cạn và trả về file tổng hợp <code>Result.xlsx</code>.{tpl_link('MSV_List_Template.xlsx')}",
+    "Gom điểm": f"<b>Trích xuất dữ liệu chuẩn Form BGD & Thường (Powered by Polars & Rust):</b><br><br><b>1. File MSV:</b> Tải lên file chứa danh sách TKSV ở cột 'TKSV'.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel cần quét vét cạn.<br><br><b>Kết quả:</b> Hệ thống tự động lấy điểm, gộp dòng, và xuất file tổng hợp.{tpl_link('MSV_List_Template.xlsx')}",
+    "Tra cứu điểm sinh viên (Cả lớp)": f"<b>Tự động Scraping EHOU (Headless):</b><br><br><b>File yêu cầu:</b> Excel chuẩn bị sẵn với 2 sheet:<br><b>1. Sheet 'Login':</b> Ô A1 (Tài khoản), Ô B1 (Mật khẩu).<br><b>2. Sheet 'Data':</b> Cột 1 (Tài khoản SV), Các cột sau chứa mã môn học.{tpl_link('TraCuuDiem_Template.xlsx')}",
+    "Kiểm tra điều kiện đăng ký môn học (Cả lớp)": f"<b>Yêu cầu file:</b> Bảng dữ liệu Excel.<br><b>Tùy chọn:</b> Có thể xác định file có chứa dòng tiêu đề hay không.<br><b>Kết quả:</b> Đánh giá điều kiện đạt (YES/NO) và phân loại trạng thái (TL/TL1).{tpl_link('KiemTraDK_Template.xlsx')}",
+    "Kiểm tra tiên quyết": f"<b>Yêu cầu file:</b> Upload đồng thời 2 file <code>Ketqua.xlsx</code> và <code>dktq.xlsx</code>.<br><br><b>Kết quả:</b> Đối soát môn tiên quyết và trả về file nén chứa <code>Ketqua_Finish.xlsx</code> và <code>dktq_Finish.xlsx</code>.{tpl_link('Ketqua_Template.xlsx')}{tpl_link('dktq_Template.xlsx')}",
+    "Điền KHLM (Updated) (*)": f"<b>Yêu cầu file:</b> <code>Data_fill.xlsx</code><br><br><b>Sheet KHLM:</b> Cần có các cột <code>TenLop</code>, <code>MaMon</code>, <code>DiaPhuongKHL</code>, <code>DiaPhuongHL</code>.<br><b>Sheet Data:</b> Cần có các cột <code>LopLT</code>, <code>MaMon</code>, <code>MaTram</code>, <code>MSV</code>.{tpl_link('Data_fill_Template.xlsx')}",
+    "Kiểm tra KHLM": f"<b>Yêu cầu file:</b> <code>Data_SLLM.xlsx</code><br><br><b>Sheet Data:</b> Cột D (Lớp), Cột H (Mã môn).<br><b>Sheet ThongKe:</b> Cột A (Lớp), Cột B (Mã môn).<br><br><b>Kết quả:</b> Đối soát lộ trình thiếu kèm với tên môn tương ứng.{tpl_link('Data_SLLM_Template.xlsx')}",
+    "Lọc kết quả học tập của sinh viên": f"<b>Yêu cầu:</b> <code>Data_Source.xlsx</code> & <code>Data.xlsb</code><br><br><b>Data_Source.xlsx:</b> Sheet 'DSSV', Cột Q (Lớp), Cột J (Mã SV), Cột D (TK SV).<br><b>Data.xlsb:</b> File nhị phân, Cột A (Mã SV).{tpl_link('Data_Source_Template.xlsx')}{tpl_link('Data_Template.xlsb')}",
+    "Lọc sinh viên học lại & học cải thiện": f"<b>Yêu cầu:</b> <code>Data_Source.xlsx</code> & <code>DanhSachDangKy.xlsx</code><br><br><b>DanhSachDangKy.xlsx:</b> Sheet 'Dangky: B,C,T' và 'Danghoc: B,G,O', Cột B (TK SV), Cột C&G (Mã môn), Cột T&O (Số TC).{tpl_link('Data_Source_Template.xlsx')}{tpl_link('DanhSachDangKy_Template.xlsx')}",
+    "Xuất Mã lớp theo GK300": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa.{tpl_link('GK300_Template.xlsx')}",
+    "Xuất KHHT theo GK300 (1*)": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa.{tpl_link('GK300_Template.xlsx')}",
+    "Xuất DSSV theo GK300 (2*)": f"<b>Yêu cầu:</b> <code>Merged_GK300.xlsx</code> tạo từ (1*) & <code>Data_Source.xlsx</code><br><b>Merged_GK300.xlsx:</b> Sheet 'KHHT_GK300', Cột L(12) là Mã LT.{tpl_link('Merged_GK300_Template.xlsx')}{tpl_link('Data_Source_Template.xlsx')}",
+    "Xuất KHHTCT theo GK300 (3*)": f"<b>Yêu cầu:</b> Cần cung cấp file <code>Merged_GK300.xlsx</code>.{tpl_link('Merged_GK300_Template.xlsx')}",
+    "Thống kê số lượng theo lớp/nhóm lớp & môn (*)": f"<b>Yêu cầu:</b> File <code>Data_SLLM.xlsx</code><br><b>Sheet Data:</b> Cột L (Mã trạm).<br><b>Sheet ThongKe:</b> Cột A (Tên lớp), B (Mã môn), Tiêu đề Cột C (Mã Trạm).{tpl_link('Data_SLLM_Template.xlsx')}",
+    "Xuất môn theo ngành học (*)": f"Đầu vào là file dữ liệu môn học phân bổ theo ngành và theo khóa.{tpl_link('Mon_NganhHoc_Template.xlsx')}"
 }
 
 col_info, col_action = st.columns([1.1, 1], gap="medium")
