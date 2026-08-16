@@ -120,7 +120,6 @@ class ExcelDataProcessor:
         actual_khlm = next((s for s in wb.sheetnames if s.lower() == 'khlm'), None)
         if not actual_khlm: return
 
-        # Ép kiểu object toàn cục để khắc phục triệt để lỗi dtype float64 khi ô rỗng
         df_khlm = pd.read_excel(self.input_file, sheet_name=actual_khlm).astype(object)
         cols = df_khlm.columns.tolist()
         col_map = {str(c).strip().upper(): c for c in cols}
@@ -164,7 +163,6 @@ class ExcelDataProcessor:
         actual_data = next((s for s in xls.sheet_names if s.lower() == 'data'), None)
         if not actual_khlm or not actual_data: return
 
-        # Ép kiểu object để trị tận gốc lỗi ValueError: Invalid value ... for dtype float64
         khlm = pd.read_excel(self.input_file, sheet_name=actual_khlm, header=0).astype(object)
         data = pd.read_excel(self.input_file, sheet_name=actual_data)
 
@@ -247,7 +245,7 @@ class ExcelDataProcessor:
         actual_res = next((s for s in wb.sheetnames if s.lower() == 'result'), None)
         if actual_res: del wb[actual_res]
         ws_result = wb.create_sheet('Result')
-        ws_result.append(["Cột A (Mã tách)", "Cột B (Từ A)", "Cột C (Từ B)", "Cột D (Từ C)", "Cột E (Từ D)", "Cột F (Trống)", "Cột G (A+D)", "Cột H (Copy B)"])
+        ws_result.append(["Cột A (M Mã tách)", "Cột B (Từ A)", "Cột C (Từ B)", "Cột D (Từ C)", "Cột E (Từ D)", "Cột F (Trống)", "Cột G (A+D)", "Cột H (Copy B)"])
         result_data_for_mapping = {}
 
         for row in range(2, ws_data.max_row + 1):
@@ -470,12 +468,22 @@ def extract_meta_multi_gom_diem(df_str, row_idx, col_indices):
     return ""
 
 def gom_diem_logic(msv_path, data_dir):
-    df_input = pl.read_excel(msv_path, engine="calamine")
-    if 'TKSV' not in df_input.columns:
-        raise ValueError("Không tìm thấy cột 'TKSV' trong file đầu vào.")
+    wb_msv = CalamineWorkbook.from_path(msv_path)
+    sheet_msv = wb_msv.get_sheet_by_index(0)
+    try: raw_msv = sheet_msv.to_python(skip_empty_area=False)
+    except TypeError: raw_msv = sheet_msv.to_python()
     
-    raw_ids = df_input.drop_nulls(subset=["TKSV"])["TKSV"].to_list()
-    student_ids_to_find = {clean_value_gom_diem(x) for x in raw_ids if clean_value_gom_diem(x) != ""}
+    if not raw_msv or len(raw_msv) < 2:
+        raise ValueError("File MSV rỗng.")
+        
+    headers = [str(x).strip().upper() if x is not None else "" for x in raw_msv[0]]
+    try:
+        tksv_idx = headers.index('TKSV')
+    except ValueError:
+        raise ValueError("Không tìm thấy cột 'TKSV' trong file đầu vào.")
+        
+    raw_ids = [clean_value_gom_diem(row[tksv_idx]) for row in raw_msv[1:] if len(row) > tksv_idx]
+    student_ids_to_find = {x for x in raw_ids if x != ""}
     if not student_ids_to_find:
         raise ValueError("Cột 'TKSV' không có dữ liệu hợp lệ.")
     
@@ -489,7 +497,7 @@ def gom_diem_logic(msv_path, data_dir):
     
     for dirpath, _, filenames in os.walk(data_dir):
         for filename in filenames:
-            if filename.lower().endswith(('.xlsx', '.xls')) and filename.lower() != 'result.xlsx' and not filename.startswith('~$'):
+            if filename.lower().endswith(('.xlsx', '.xls', '.xlsm', '.xlsb')) and filename.lower() != 'result.xlsx' and not filename.startswith('~$'):
                 filepath = os.path.join(dirpath, filename)
                 try:
                     wb = CalamineWorkbook.from_path(filepath)
@@ -689,19 +697,23 @@ def gom_diem_logic(msv_path, data_dir):
         raise ValueError("Quá trình quét kết thúc. Không tìm thấy dữ liệu nào trùng khớp với danh sách TKSV.")
 
 def gom_diem_uni_logic(msv_path, data_dir):
-    msv_df = pl.read_excel(msv_path, engine="calamine")
-    if len(msv_df.columns) == 0:
+    wb_msv = CalamineWorkbook.from_path(msv_path)
+    sheet_msv = wb_msv.get_sheet_by_index(0)
+    try: raw_msv = sheet_msv.to_python(skip_empty_area=False)
+    except TypeError: raw_msv = sheet_msv.to_python()
+    
+    if not raw_msv or len(raw_msv) < 2:
         raise ValueError("File MSV rỗng.")
         
-    first_col = msv_df.columns[0]
-    raw_msvs = msv_df.get_column(first_col).drop_nulls().cast(pl.Utf8)
-    cleaned_msvs = (
-        raw_msvs.str.strip_chars()
-        .str.to_uppercase()
-        .str.replace(r"\.0$", "", literal=False)
-    )
-    
-    msv_set = set(cleaned_msvs.to_list())
+    raw_ids = []
+    for row in raw_msv[1:]:
+        if len(row) > 0 and row[0] is not None:
+            val = str(row[0]).strip().upper()
+            if val.endswith('.0') and val[:-2].lstrip('-').isdigit():
+                val = val[:-2]
+            if val: raw_ids.append(val)
+                
+    msv_set = set(raw_ids)
     msv_set.discard("") 
     msv_list = list(msv_set)
     
@@ -723,14 +735,24 @@ def gom_diem_uni_logic(msv_path, data_dir):
     for file_path in target_files:
         filename = os.path.basename(file_path)
         try:
-            sheets_dict = pl.read_excel(file_path, engine="calamine", sheet_id=0)
-            if isinstance(sheets_dict, pl.DataFrame):
-                sheets_dict = {"Sheet1": sheets_dict}
-
-            for sheet_name, df in sheets_dict.items():
-                if df.is_empty() or len(df.columns) == 0:
-                    continue
-
+            wb = CalamineWorkbook.from_path(file_path)
+            for sheet_name in wb.sheet_names:
+                sheet = wb.get_sheet_by_name(sheet_name)
+                try: raw_data = sheet.to_python(skip_empty_area=False)
+                except TypeError: raw_data = sheet.to_python()
+                
+                if not raw_data: continue
+                max_cols = max(len(row) for row in raw_data)
+                if max_cols == 0: continue
+                
+                str_data = []
+                for row in raw_data:
+                    str_row = [str(val).strip() if val is not None else "" for val in row]
+                    if len(str_row) < max_cols:
+                        str_row.extend([""] * (max_cols - len(str_row)))
+                    str_data.append(str_row)
+                    
+                df = pl.DataFrame(str_data, orient="row")
                 df = df.select(pl.all().cast(pl.Utf8))
                 
                 exprs = [
@@ -1424,7 +1446,7 @@ with st.sidebar:
     choice = menu_options[selected_label]
     
     st.markdown("---")
-    st.caption("Ver 10.3 | Bug Fix Edition")
+    st.caption("Ver 11.0 | Stable Calamine Edition")
 
 # ==========================================
 # GIAO DIỆN CHÍNH (SINGLE-SCREEN GRID LAYOUT)
@@ -1436,13 +1458,13 @@ st.markdown(f"""
     </div>
 """, unsafe_allow_html=True)
 
-TEMPLATE_BASE_URL = "https://github.com/dangvannghia204/hou-tools/raw/refs/heads/main/templates"
+TEMPLATE_BASE_URL = "https://raw.githubusercontent.com/dangvannghia204/hou-tools/main/templates"
 
 def tpl_link(filename):
     return f"<br><a href='{TEMPLATE_BASE_URL}/{filename}' download='{filename}' style='display: inline-block; margin-top: 10px; margin-right: 10px; padding: 6px 12px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 0.85rem;'>📥 File Mẫu: {filename}</a>"
 
 instructions = {
-    "Gộp File Nguồn": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa (Mỗi sheet chứa bảng đăng ký).",
+    "Gộp File Nguồn": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa (Mỗi sheet chứa bảng đăng ký).{tpl_link('GK300_Template.xlsx')}",
     "Gom điểm UNI": f"<b>Trích xuất dữ liệu đa File (Powered by Polars & Rust):</b><br><b>1. File MSV:</b> Tải lên file Excel chứa danh sách Mã SV (ở cột đầu tiên) vào ô bên trái.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel cần quét vào khu vực bên phải.<br><b>Kết quả:</b> Hệ thống quét vét cạn và trả về file tổng hợp <code>Result.xlsx</code>.{tpl_link('TKSV_Template.xlsx')}",
     "Gom điểm": f"<b>Trích xuất dữ liệu chuẩn Form BGD & Thường (Powered by Polars & Rust):</b><br><b>1. File MSV:</b> Tải lên file chứa danh sách TKSV ở cột 'TKSV'.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel cần quét vét cạn.<br><b>Kết quả:</b> Hệ thống tự động lấy điểm, gộp dòng, và xuất file tổng hợp.{tpl_link('TKSV_Template.xlsx')}",
     "Tra cứu điểm sinh viên (Cả lớp)": f"<b>Tự động Scraping EHOU (Headless):</b><br><br><b>File yêu cầu:</b> Excel chuẩn bị sẵn với 2 sheet:<br><b>1. Sheet 'Login':</b> Ô A2 (Tài khoản), Ô B2 (Mật khẩu).<br><b>2. Sheet 'Data':</b> Cột 1 (Tài khoản SV), Các cột sau chứa mã môn học.{tpl_link('TraCuuDiem_Template.xlsx')}",
