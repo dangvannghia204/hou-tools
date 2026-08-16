@@ -1474,10 +1474,10 @@ instructions = {
     "Kiểm tra KHLM": f"<b>Yêu cầu file:</b> <code>Data_SLLM.xlsx</code><br><br><b>Sheet Data:</b> Cột D (Lớp), Cột H (Mã môn).<br><b>Sheet ThongKe:</b> Cột A (Lớp), Cột B (Mã môn).<br><br><b>Kết quả:</b> Đối soát lộ trình thiếu kèm với tên môn tương ứng.{tpl_link('Data_SLLM_Template.xlsx')}",
     "Lọc kết quả học tập của sinh viên": f"<b>Yêu cầu:</b> <code>Data_Source.xlsx</code> & <code>Data.xlsb</code><br><br><b>Data_Source.xlsx:</b> Sheet 'DSSV', Cột Q (Lớp), Cột J (Mã SV), Cột D (TK SV).<br><b>Data.xlsb:</b> File nhị phân, Cột A (Mã SV).{tpl_link('Data_Source_Template.xlsx')}{tpl_link('Data_Template.xlsb')}",
     "Lọc sinh viên học lại & học cải thiện": f"<b>Yêu cầu:</b> <code>Data_Source.xlsx</code> & <code>DanhSachDangKy.xlsx</code><br><br><b>DanhSachDangKy.xlsx:</b> Sheet 'Dangky: B,C,T' và 'Danghoc: B,G,O', Cột B (TK SV), Cột C&G (Mã môn), Cột T&O (Số TC).{tpl_link('Data_Source_Template.xlsx')}{tpl_link('DanhSachDangKy_Template.xlsx')}",
-    "Xuất Mã lớp theo GK300": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa.{tpl_link('GK300_Template.xlsx')}",
-    "Xuất KHHT theo GK300 (1*)": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa.{tpl_link('GK300_Template.xlsx')}",
+    "Xuất Mã lớp theo GK300": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa.",
+    "Xuất KHHT theo GK300 (1*)": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa.",
     "Xuất DSSV theo GK300 (2*)": f"<b>Yêu cầu:</b> <code>Merged_GK300.xlsx</code> tạo từ (1*) & <code>Data_Source.xlsx</code><br><b>Merged_GK300.xlsx:</b> Sheet 'KHHT_GK300', Cột L(12) là Mã LT.{tpl_link('Merged_GK300_Template.xlsx')}{tpl_link('Data_Source_Template.xlsx')}",
-    "Xuất KHHTCT theo GK300 (3*)": f"<b>Yêu cầu:</b> Cần cung cấp file <code>Merged_GK300.xlsx</code>.{tpl_link('Merged_GK300_Template.xlsx')}",
+    "Xuất KHHTCT theo GK300 (3*)": f"<b>Yêu cầu:</b> Cần cung cấp file <code>Merged_GK300.xlsx</code>.",
     "Thống kê số lượng theo lớp/nhóm lớp & môn (*)": f"<b>Yêu cầu:</b> File <code>Data_SLLM.xlsx</code><br><b>Sheet Data:</b> Cột L (Mã trạm).<br><b>Sheet ThongKe:</b> Cột A (Tên lớp), B (Mã môn), Tiêu đề Cột C (Mã Trạm).{tpl_link('Data_SLLM_Template.xlsx')}",
     "Xuất môn theo ngành học (*)": f"Đầu vào là file dữ liệu môn học phân bổ theo ngành và theo khóa.{tpl_link('Mon_NganhHoc_Template.xlsx')}"
 }
