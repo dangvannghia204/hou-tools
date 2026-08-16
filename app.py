@@ -1407,7 +1407,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # THIẾT LẬP ĐƯỜNG DẪN GITHUB TẠI ĐÂY
-TEMPLATE_BASE_URL = "https://github.com/YOUR_USERNAME/YOUR_REPO/raw/main/Template"
+TEMPLATE_BASE_URL = "https://github.com/dangvannghia204/hou-tools/tree/main/templates"
 
 def tpl_link(filename):
     return f"<br><a href='{TEMPLATE_BASE_URL}/{filename}' target='_blank' style='display: inline-block; margin-top: 10px; margin-right: 10px; padding: 6px 12px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 0.85rem;'>📥 Mẫu {filename}</a>"
