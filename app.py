@@ -1406,11 +1406,13 @@ st.markdown(f"""
     </div>
 """, unsafe_allow_html=True)
 
-# THIẾT LẬP ĐƯỜNG DẪN GITHUB TẠI ĐÂY
-TEMPLATE_BASE_URL = "https://github.com/dangvannghia204/hou-tools/tree/main/templates"
+# THIẾT LẬP ĐƯỜNG DẪN GITHUB TẠI ĐÂY 
+# MẸO: Sử dụng tiền tố "raw.githubusercontent.com" thay vì "github.com" để link tải thẳng về máy không qua trang trung gian.
+TEMPLATE_BASE_URL = "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/Template"
 
 def tpl_link(filename):
-    return f"<br><a href='{TEMPLATE_BASE_URL}/{filename}' target='_blank' style='display: inline-block; margin-top: 10px; margin-right: 10px; padding: 6px 12px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 0.85rem;'>📥 Mẫu {filename}</a>"
+    # Loại bỏ target='_blank' và thêm thuộc tính download='{filename}' để trình duyệt tải trực tiếp ngay tại trang
+    return f"<br><a href='{TEMPLATE_BASE_URL}/{filename}' download='{filename}' style='display: inline-block; margin-top: 10px; margin-right: 10px; padding: 6px 12px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 0.85rem;'>📥 Mẫu {filename}</a>"
 
 instructions = {
     "Gộp File Nguồn": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa (Mỗi sheet chứa bảng đăng ký).{tpl_link('GK300_Template.xlsx')}",
