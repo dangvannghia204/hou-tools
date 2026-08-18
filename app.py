@@ -1218,32 +1218,75 @@ def extract_courses_logic(folder_path):
 
 def fill_sllm_logic(folder_path):
     file_path = os.path.join(folder_path, "Data_SLLM.xlsx")
-    if not os.path.exists(file_path): raise ValueError("Không tìm thấy tệp Data_SLLM.xlsx!")
+    if not os.path.exists(file_path): 
+        raise ValueError("Không tìm thấy tệp Data_SLLM.xlsx!")
+        
     wb = load_workbook(file_path)
-    if "Data" not in wb.sheetnames or "ThongKe" not in wb.sheetnames: raise ValueError("Tệp Data_SLLM.xlsx phải chứa sheet 'Data' và 'ThongKe'!")
+    if "Data" not in wb.sheetnames or "ThongKe" not in wb.sheetnames: 
+        raise ValueError("Tệp Data_SLLM.xlsx phải chứa sheet 'Data' và 'ThongKe'!")
+        
     ws_data = wb["Data"]
     data_map = {}
+    unique_regions = set()  # Tập hợp lưu trữ các mã duy nhất quét được từ cột L
+    
+    # --- BƯỚC 1: QUÉT MÃ TẠI CỘT L VÀ GOM NHÓM DỮ LIỆU TRÊN SHEET DATA ---
     for r in range(2, ws_data.max_row + 1):
-        cell_k = ws_data.cell(row=r, column=11).value
-        val_k = str(cell_k or "").strip()
-        region = "HCM" if len(val_k) >= 4 and val_k[1:4].upper() == "DNV" else ("DNP" if len(val_k) >= 4 and val_k[1:4].upper() == "DNP" else "")
-        ws_data.cell(row=r, column=12, value=region)
-        ma_lm, ma_hp = str(ws_data.cell(row=r, column=4).value or "").strip().lower(), str(ws_data.cell(row=r, column=8).value or "").strip().lower()
+        # Đọc trực tiếp mã tại cột L (Cột 12), loại bỏ khoảng trắng thừa
+        cell_l = ws_data.cell(row=r, column=12).value
+        region = str(cell_l or "").strip()
+        
+        # Nếu dòng này có mã (không bị trống), thêm vào tập hợp các mã duy nhất
+        if region:
+            unique_regions.add(region)
+            
+        ma_lm = str(ws_data.cell(row=r, column=4).value or "").strip().lower()
+        ma_hp = str(ws_data.cell(row=r, column=8).value or "").strip().lower()
+        
         if ma_lm and ma_hp:
             key = (ma_hp, ma_lm)
-            if key not in data_map: data_map[key] = {"DNP": 0, "HCM": 0}
-            if region in ["DNP", "HCM"]: data_map[key][region] += 1
+            if key not in data_map: 
+                data_map[key] = {}
+            
+            # Tích lũy số lượng cho mã cụ thể tại cột L của cặp (mã học phần, mã lớp môn)
+            if region:
+                data_map[key][region] = data_map[key].get(region, 0) + 1
+
+    # Sắp xếp danh sách mã theo thứ tự chữ cái để tiêu đề hiển thị ngăn nắp (VD: DNP, HCM,...)
+    regions_list = sorted(list(unique_regions))
+    
+    # --- BƯỚC 2: CẬP NHẬT TIÊU ĐỀ ĐỘNG TRÊN SHEET THONGKE ---
     ws_tk = wb["ThongKe"]
+    
+    # Điền các mã duy nhất vào dòng 1, bắt đầu từ cột C (Cột 3) trở đi
+    for idx, region_code in enumerate(regions_list):
+        ws_tk.cell(row=1, column=3 + idx, value=region_code)
+        
+    # --- BƯỚC 3: TỔNG HỢP VÀ THỐNG KÊ DỮ LIỆU ĐỘNG SANG SHEET THONGKE ---
     for r in range(2, ws_tk.max_row + 1):
-        ma_hp_tk, ma_lm_str = str(ws_tk.cell(row=r, column=2).value or "").strip().lower(), str(ws_tk.cell(row=r, column=1).value or "").strip()
-        dnp_sum, hcm_sum = 0, 0
+        ma_hp_tk = str(ws_tk.cell(row=r, column=2).value or "").strip().lower()
+        ma_lm_str = str(ws_tk.cell(row=r, column=1).value or "").strip()
+        
+        # Khởi tạo từ điển lưu tổng số lượng của từng mã cho dòng thống kê hiện tại
+        sums_by_region = {region: 0 for region in regions_list}
+        
         if ma_hp_tk and ma_lm_str:
             codes = [c.strip().lower() for c in ma_lm_str.split(',')]
             for code in codes:
                 key = (ma_hp_tk, code)
-                if key in data_map: dnp_sum += data_map[key]["DNP"]; hcm_sum += data_map[key]["HCM"]
-        ws_tk.cell(row=r, column=3, value=dnp_sum); ws_tk.cell(row=r, column=4, value=hcm_sum)
-    for sheet in [ws_data, ws_tk]: apply_full_border(sheet); auto_fit_columns(sheet)
+                if key in data_map:
+                    # Cộng dồn số lượng dựa trên các mã có trong danh sách động
+                    for region in regions_list:
+                        sums_by_region[region] += data_map[key].get(region, 0)
+                        
+        # Ghi các giá trị tổng hợp được vào các cột tương ứng trên sheet ThongKe
+        for idx, region in enumerate(regions_list):
+            ws_tk.cell(row=r, column=3 + idx, value=sums_by_region[region])
+            
+    # --- BƯỚC 4: ĐỊNH DẠNG VÀ LƯU FILE ---
+    for sheet in [ws_data, ws_tk]: 
+        apply_full_border(sheet)
+        auto_fit_columns(sheet)
+        
     wb.save(file_path)
     return file_path
 
