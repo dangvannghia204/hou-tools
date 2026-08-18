@@ -1218,6 +1218,7 @@ def extract_courses_logic(folder_path):
 
 def fill_sllm_logic(folder_path):
     file_path = os.path.join(folder_path, "Data_SLLM.xlsx")
+    output_file_path = os.path.join(folder_path, "Data_SLLM_Finish.xlsx")
     if not os.path.exists(file_path): 
         raise ValueError("Không tìm thấy tệp Data_SLLM.xlsx!")
         
@@ -1287,8 +1288,8 @@ def fill_sllm_logic(folder_path):
         apply_full_border(sheet)
         auto_fit_columns(sheet)
         
-    wb.save(file_path)
-    return file_path
+    wb.save(output_file_path)
+    return output_file_path
 
 def compare_data_logic(folder_path):
     file_xlsb, file_src, output_file = os.path.join(folder_path, "Data.xlsb"), os.path.join(folder_path, "Data_Source.xlsx"), os.path.join(folder_path, "Compared_Result.xlsx")
