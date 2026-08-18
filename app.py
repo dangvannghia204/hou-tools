@@ -1521,7 +1521,7 @@ instructions = {
     "Xuất KHHT theo GK300 (1*)": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa.",
     "Xuất DSSV theo GK300 (2*)": f"<b>Yêu cầu:</b> <code>Merged_GK300.xlsx</code> tạo từ Xuất KHHT (1*) & <code>Data_Source.xlsx</code><br><b>Merged_GK300.xlsx:</b> Sheet 'KHHT_GK300', Cột L(12) là Mã LT.{tpl_link('Data_Source_Template.xlsx')}",
     "Xuất KHHTCT theo GK300 (3*)": f"<b>Yêu cầu:</b> Sử dụng kết quả Xuất DSSV (2*), File: <code>Merged_GK300.xlsx </code>.",
-    "Thống kê số lượng theo lớp/nhóm lớp & môn (*)": f"<b>Yêu cầu:</b> File <code>Data_SLLM.xlsx</code><br><b>Sheet Data:</b> Cột L (Mã trạm).<br><b>Sheet ThongKe:</b> Cột A (Tên lớp), B (Mã môn), Tiêu đề Cột C (Mã Trạm).{tpl_link('Data_SLLM_Template.xlsx')}",
+    "Thống kê số lượng theo lớp/nhóm lớp & môn (*)": f"<b>Yêu cầu:</b> File <code>Data_SLLM.xlsx</code><br><b>Sheet Data:</b> Cột L (Mã trạm).<br><b>Sheet ThongKe:</b> Cột A (Tên lớp), B (Mã môn).{tpl_link('Data_SLLM_Template.xlsx')}",
     "Xuất môn theo ngành học (*)": f"Đầu vào là file dữ liệu môn học phân bổ theo ngành và theo khóa.{tpl_link('Mon_NganhHoc_Template.xlsx')}"
 }
 
