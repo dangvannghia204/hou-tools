@@ -1,2 +1,4 @@
 chromium
 chromium-driver
+p7zip-full
+unrar
