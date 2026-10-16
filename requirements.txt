@@ -6,3 +6,4 @@ pyxlsb
 selenium
 polars
 python-calamine
+patool
