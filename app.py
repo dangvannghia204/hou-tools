@@ -1555,7 +1555,7 @@ with col_info:
     status_container = st.empty() 
 
 with col_action:
-    uploader_label = "Kéo thả các file Excel hoặc Nén (ZIP/RAR) vào đây"
+    uploader_label = "Kéo thả các file Excel hoặc file Nén (ZIP) vào đây"
     uploaded_files = st.file_uploader(uploader_label, accept_multiple_files=True, type=['xlsx', 'xlsb', 'xls', 'xlsm', 'zip', 'rar'])
     
     if st.button("🚀 XỬ LÝ DỮ LIỆU"):
