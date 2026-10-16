@@ -7,3 +7,5 @@ selenium
 polars
 python-calamine
 patool
+p7zip-full
+unrar
