@@ -4,6 +4,7 @@ import shutil
 import re
 import math
 import zipfile
+import uuid
 from datetime import datetime
 from copy import copy
 import pandas as pd
@@ -245,7 +246,7 @@ class ExcelDataProcessor:
         actual_res = next((s for s in wb.sheetnames if s.lower() == 'result'), None)
         if actual_res: del wb[actual_res]
         ws_result = wb.create_sheet('Result')
-        ws_result.append(["Cột A (M Mã tách)", "Cột B (Từ A)", "Cột C (Từ B)", "Cột D (Từ C)", "Cột E (Từ D)", "Cột F (Trống)", "Cột G (A+D)", "Cột H (Copy B)"])
+        ws_result.append(["Cột A (Mã tách)", "Cột B (Từ A)", "Cột C (Từ B)", "Cột D (Từ C)", "Cột E (Từ D)", "Cột F (Trống)", "Cột G (A+D)", "Cột H (Copy B)"])
         result_data_for_mapping = {}
 
         for row in range(2, ws_data.max_row + 1):
@@ -355,6 +356,53 @@ def format_excel_date(cell):
 # ==========================================
 # CÁC HÀM XỬ LÝ (WRAPPERS)
 # ==========================================
+
+def extract_and_flatten_files(uploaded_list, target_directory):
+    """Hàm cốt lõi: Lưu file, giải nén ZIP/RAR nếu có, và là phẳng đưa tất cả Excel ra thư mục gốc"""
+    extract_temp = os.path.join(target_directory, "_extract_temp")
+    os.makedirs(extract_temp, exist_ok=True)
+    
+    for uf in uploaded_list:
+        ext = os.path.splitext(uf.name)[1].lower()
+        saved_path = os.path.join(extract_temp, uf.name)
+        
+        with open(saved_path, "wb") as f:
+            f.write(uf.getbuffer())
+            
+        if ext == '.zip':
+            try:
+                with zipfile.ZipFile(saved_path, 'r') as zip_ref:
+                    zip_ref.extractall(extract_temp)
+                os.remove(saved_path)
+            except Exception as e:
+                st.error(f"Lỗi giải nén ZIP ({uf.name}): {e}")
+        elif ext == '.rar':
+            try:
+                import patoolib
+                patoolib.extract_archive(saved_path, outdir=extract_temp, interactive=False)
+                os.remove(saved_path)
+            except ImportError:
+                st.warning(f"Thư mục thiếu thư viện 'patool' để giải nén RAR ({uf.name}). Vui lòng nén thành ZIP hoặc nâng cấp hệ thống.")
+            except Exception as e:
+                st.error(f"Lỗi giải nén RAR ({uf.name}): {e}")
+
+    # Lặp đệ quy vét toàn bộ file Excel mang ra ngoài thư mục đích (Target Directory)
+    for root_dir, _, files in os.walk(extract_temp):
+        for file in files:
+            if file.lower().endswith(('.xlsx', '.xls', '.xlsb', '.xlsm')) and not file.startswith('~$'):
+                src_path = os.path.join(root_dir, file)
+                dest_path = os.path.join(target_directory, file)
+                
+                # Đổi tên nếu trùng để không mất data
+                if os.path.exists(dest_path): 
+                    base, extension = os.path.splitext(file)
+                    dest_path = os.path.join(target_directory, f"{base}_{uuid.uuid4().hex[:6]}{extension}")
+                    
+                shutil.move(src_path, dest_path)
+                
+    shutil.rmtree(extract_temp)
+
+
 def check_tien_quyet_logic(folder_path):
     ketqua_file = None
     dktq_file = None
@@ -365,7 +413,7 @@ def check_tien_quyet_logic(folder_path):
             dktq_file = os.path.join(folder_path, f)
 
     if not ketqua_file or not dktq_file:
-        raise ValueError("Không tìm thấy đủ 2 file 'Ketqua.xlsx' và 'dktq.xlsx' trong thư mục đã tải lên!")
+        raise ValueError("Không tìm thấy đủ 2 file 'Ketqua.xlsx' và 'dktq.xlsx' trong dữ liệu đã tải lên!")
 
     wb_kq = load_workbook(ketqua_file)
     ws_kq = wb_kq.active
@@ -1218,78 +1266,34 @@ def extract_courses_logic(folder_path):
 
 def fill_sllm_logic(folder_path):
     file_path = os.path.join(folder_path, "Data_SLLM.xlsx")
-    output_file_path = os.path.join(folder_path, "Data_SLLM_Finish.xlsx")
-    if not os.path.exists(file_path): 
-        raise ValueError("Không tìm thấy tệp Data_SLLM.xlsx!")
-        
+    if not os.path.exists(file_path): raise ValueError("Không tìm thấy tệp Data_SLLM.xlsx!")
     wb = load_workbook(file_path)
-    if "Data" not in wb.sheetnames or "ThongKe" not in wb.sheetnames: 
-        raise ValueError("Tệp Data_SLLM.xlsx phải chứa sheet 'Data' và 'ThongKe'!")
-        
+    if "Data" not in wb.sheetnames or "ThongKe" not in wb.sheetnames: raise ValueError("Tệp Data_SLLM.xlsx phải chứa sheet 'Data' và 'ThongKe'!")
     ws_data = wb["Data"]
     data_map = {}
-    unique_regions = set()  # Tập hợp lưu trữ các mã duy nhất quét được từ cột L
-    
-    # --- BƯỚC 1: QUÉT MÃ TẠI CỘT L VÀ GOM NHÓM DỮ LIỆU TRÊN SHEET DATA ---
     for r in range(2, ws_data.max_row + 1):
-        # Đọc trực tiếp mã tại cột L (Cột 12), loại bỏ khoảng trắng thừa
-        cell_l = ws_data.cell(row=r, column=12).value
-        region = str(cell_l or "").strip()
-        
-        # Nếu dòng này có mã (không bị trống), thêm vào tập hợp các mã duy nhất
-        if region:
-            unique_regions.add(region)
-            
-        ma_lm = str(ws_data.cell(row=r, column=4).value or "").strip().lower()
-        ma_hp = str(ws_data.cell(row=r, column=8).value or "").strip().lower()
-        
+        cell_k = ws_data.cell(row=r, column=11).value
+        val_k = str(cell_k or "").strip()
+        region = "HCM" if len(val_k) >= 4 and val_k[1:4].upper() == "DNV" else ("DNP" if len(val_k) >= 4 and val_k[1:4].upper() == "DNP" else "")
+        ws_data.cell(row=r, column=12, value=region)
+        ma_lm, ma_hp = str(ws_data.cell(row=r, column=4).value or "").strip().lower(), str(ws_data.cell(row=r, column=8).value or "").strip().lower()
         if ma_lm and ma_hp:
             key = (ma_hp, ma_lm)
-            if key not in data_map: 
-                data_map[key] = {}
-            
-            # Tích lũy số lượng cho mã cụ thể tại cột L của cặp (mã học phần, mã lớp môn)
-            if region:
-                data_map[key][region] = data_map[key].get(region, 0) + 1
-
-    # Sắp xếp danh sách mã theo thứ tự chữ cái để tiêu đề hiển thị ngăn nắp (VD: DNP, HCM,...)
-    regions_list = sorted(list(unique_regions))
-    
-    # --- BƯỚC 2: CẬP NHẬT TIÊU ĐỀ ĐỘNG TRÊN SHEET THONGKE ---
+            if key not in data_map: data_map[key] = {"DNP": 0, "HCM": 0}
+            if region in ["DNP", "HCM"]: data_map[key][region] += 1
     ws_tk = wb["ThongKe"]
-    
-    # Điền các mã duy nhất vào dòng 1, bắt đầu từ cột C (Cột 3) trở đi
-    for idx, region_code in enumerate(regions_list):
-        ws_tk.cell(row=1, column=3 + idx, value=region_code)
-        
-    # --- BƯỚC 3: TỔNG HỢP VÀ THỐNG KÊ DỮ LIỆU ĐỘNG SANG SHEET THONGKE ---
     for r in range(2, ws_tk.max_row + 1):
-        ma_hp_tk = str(ws_tk.cell(row=r, column=2).value or "").strip().lower()
-        ma_lm_str = str(ws_tk.cell(row=r, column=1).value or "").strip()
-        
-        # Khởi tạo từ điển lưu tổng số lượng của từng mã cho dòng thống kê hiện tại
-        sums_by_region = {region: 0 for region in regions_list}
-        
+        ma_hp_tk, ma_lm_str = str(ws_tk.cell(row=r, column=2).value or "").strip().lower(), str(ws_tk.cell(row=r, column=1).value or "").strip()
+        dnp_sum, hcm_sum = 0, 0
         if ma_hp_tk and ma_lm_str:
             codes = [c.strip().lower() for c in ma_lm_str.split(',')]
             for code in codes:
                 key = (ma_hp_tk, code)
-                if key in data_map:
-                    # Cộng dồn số lượng dựa trên các mã có trong danh sách động
-                    for region in regions_list:
-                        sums_by_region[region] += data_map[key].get(region, 0)
-                        
-        # Ghi các giá trị tổng hợp được vào các cột tương ứng trên sheet ThongKe
-        for idx, region in enumerate(regions_list):
-            ws_tk.cell(row=r, column=3 + idx, value=sums_by_region[region])
-            
-    # --- BƯỚC 4: ĐỊNH DẠNG VÀ LƯU FILE ---
-    for sheet in [ws_data, ws_tk]: 
-        apply_full_border(sheet)
-        auto_fit_columns(sheet)
-        
-    wb.save(output_file_path)
-    return output_file_path
+                if key in data_map: dnp_sum += data_map[key]["DNP"]; hcm_sum += data_map[key]["HCM"]
+        ws_tk.cell(row=r, column=3, value=dnp_sum); ws_tk.cell(row=r, column=4, value=hcm_sum)
+    for sheet in [ws_data, ws_tk]: apply_full_border(sheet); auto_fit_columns(sheet)
+    wb.save(file_path)
+    return file_path
 
 def compare_data_logic(folder_path):
     file_xlsb, file_src, output_file = os.path.join(folder_path, "Data.xlsb"), os.path.join(folder_path, "Data_Source.xlsx"), os.path.join(folder_path, "Compared_Result.xlsx")
@@ -1460,6 +1464,48 @@ def extract_class_names_logic(folder_path):
     apply_full_border(ws); auto_fit_columns(ws); wb.save(op)
     return op
 
+def extract_and_flatten_files(uploaded_list, target_directory):
+    extract_temp = os.path.join(target_directory, "_extract_temp")
+    os.makedirs(extract_temp, exist_ok=True)
+    
+    for uf in uploaded_list:
+        ext = os.path.splitext(uf.name)[1].lower()
+        saved_path = os.path.join(extract_temp, uf.name)
+        
+        with open(saved_path, "wb") as f:
+            f.write(uf.getbuffer())
+            
+        if ext == '.zip':
+            try:
+                with zipfile.ZipFile(saved_path, 'r') as zip_ref:
+                    zip_ref.extractall(extract_temp)
+                os.remove(saved_path)
+            except Exception as e:
+                st.error(f"Lỗi giải nén ZIP ({uf.name}): {e}")
+        elif ext == '.rar':
+            try:
+                import patoolib
+                patoolib.extract_archive(saved_path, outdir=extract_temp, interactive=False)
+                os.remove(saved_path)
+            except ImportError:
+                st.warning(f"Chưa cài đặt thư viện 'patool' để giải nén RAR ({uf.name}). Vui lòng dùng ZIP hoặc cài đặt patool.")
+            except Exception as e:
+                st.error(f"Lỗi giải nén RAR ({uf.name}): {e}")
+
+    for root_dir, _, files in os.walk(extract_temp):
+        for file in files:
+            if file.lower().endswith(('.xlsx', '.xls', '.xlsb', '.xlsm')) and not file.startswith('~$'):
+                src_path = os.path.join(root_dir, file)
+                dest_path = os.path.join(target_directory, file)
+                
+                if os.path.exists(dest_path): 
+                    base, extension = os.path.splitext(file)
+                    dest_path = os.path.join(target_directory, f"{base}_{uuid.uuid4().hex[:6]}{extension}")
+                    
+                shutil.move(src_path, dest_path)
+                
+    shutil.rmtree(extract_temp)
+
 # ==========================================
 # MENU SIDEBAR 
 # ==========================================
@@ -1490,7 +1536,7 @@ with st.sidebar:
     choice = menu_options[selected_label]
     
     st.markdown("---")
-    st.caption("Ver 11.0 | Stable Calamine Edition")
+    st.caption("Ver 11.2 | Advanced Zip Extractor")
 
 # ==========================================
 # GIAO DIỆN CHÍNH (SINGLE-SCREEN GRID LAYOUT)
@@ -1508,21 +1554,21 @@ def tpl_link(filename):
     return f"<br><a href='{TEMPLATE_BASE_URL}/{filename}' download='{filename}' style='display: inline-block; margin-top: 10px; margin-right: 10px; padding: 6px 12px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 0.85rem;'>📥 File Mẫu: {filename}</a>"
 
 instructions = {
-    "Gộp File Nguồn": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa (Mỗi sheet chứa bảng đăng ký).",
-    "Gom điểm UNI": f"<b>Trích xuất dữ liệu đa File (Powered by Polars & Rust):</b><br><b>1. File MSV:</b> Tải lên file Excel chứa danh sách Mã SV (ở cột đầu tiên) vào ô bên trái.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel cần quét vào khu vực bên phải.<br><b>Kết quả:</b> Hệ thống quét vét cạn và trả về file tổng hợp <code>Result.xlsx</code>.{tpl_link('TKSV_Template.xlsx')}",
-    "Gom điểm": f"<b>Trích xuất dữ liệu chuẩn Form BGD & Thường (Powered by Polars & Rust):</b><br><b>1. File MSV:</b> Tải lên file chứa danh sách TKSV ở cột 'TKSV'.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel cần quét vét cạn.<br><b>Kết quả:</b> Hệ thống tự động lấy điểm, gộp dòng, và xuất file tổng hợp.{tpl_link('TKSV_Template.xlsx')}",
+    "Gộp File Nguồn": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa (Mỗi sheet chứa bảng đăng ký).{tpl_link('GK300_Template.xlsx')}",
+    "Gom điểm UNI": f"<b>Trích xuất dữ liệu đa File (Powered by Polars & Rust):</b><br><b>1. File MSV:</b> Tải lên file Excel chứa danh sách Mã SV (ở cột đầu tiên) vào ô bên trái.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel hoặc NÉN (ZIP/RAR) cần quét vào khu vực bên phải.<br><b>Kết quả:</b> Hệ thống quét vét cạn và trả về file tổng hợp <code>Result.xlsx</code>.{tpl_link('TKSV_Template.xlsx')}",
+    "Gom điểm": f"<b>Trích xuất dữ liệu chuẩn Form BGD & Thường (Powered by Polars & Rust):</b><br><b>1. File MSV:</b> Tải lên file chứa danh sách TKSV ở cột 'TKSV'.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel hoặc NÉN (ZIP/RAR) cần quét vét cạn.<br><b>Kết quả:</b> Hệ thống tự động lấy điểm, gộp dòng, và xuất file tổng hợp.{tpl_link('TKSV_Template.xlsx')}",
     "Tra cứu điểm sinh viên (Cả lớp)": f"<b>Tự động Scraping EHOU (Headless):</b><br><br><b>File yêu cầu:</b> Excel chuẩn bị sẵn với 2 sheet:<br><b>1. Sheet 'Login':</b> Ô A2 (Tài khoản), Ô B2 (Mật khẩu).<br><b>2. Sheet 'Data':</b> Cột 1 (Tài khoản SV), Các cột sau chứa mã môn học.{tpl_link('TraCuuDiem_Template.xlsx')}",
     "Kiểm tra điều kiện đăng ký môn học (Cả lớp)": f"<b>Yêu cầu file:</b> Sử dụng kết quả: Tra cứu điểm sinh viên (Cả lớp 1*).<br><b>Tùy chọn:</b> Có thể xác định file có chứa dòng tiêu đề hay không.<br><b>Kết quả:</b> Đánh giá điều kiện đạt (YES/NO) và phân loại trạng thái (TL/TL1).",
-    "Kiểm tra tiên quyết": f"<b>Yêu cầu file:</b> Upload đồng thời 2 file <code>Ketqua.xlsx</code> và <code>dktq.xlsx</code>.<br><br><b>Kết quả:</b> Đối soát môn tiên quyết và trả về file nén chứa <code>Ketqua_Finish.xlsx</code> và <code>dktq_Finish.xlsx</code>.{tpl_link('Ketqua_Template.xlsx')}{tpl_link('dktq_Template.xlsx')}",
+    "Kiểm tra tiên quyết": f"<b>Yêu cầu file:</b> Upload đồng thời 2 file <code>Ketqua.xlsx</code> và <code>dktq.xlsx</code> (hoặc nén file ZIP).<br><br><b>Kết quả:</b> Đối soát môn tiên quyết và trả về file nén chứa <code>Ketqua_Finish.xlsx</code> và <code>dktq_Finish.xlsx</code>.{tpl_link('Ketqua_Template.xlsx')}{tpl_link('dktq_Template.xlsx')}",
     "Điền KHLM (Updated) (*)": f"<b>Yêu cầu file:</b> <code>Data_fill.xlsx</code><br><br><b>Sheet KHLM:</b> Cần có các cột <code>TenLop</code>, <code>MaMon</code>, <code>DiaPhuongKHL</code>, <code>DiaPhuongHL</code>.<br><b>Sheet Data:</b> Cần có các cột <code>LopLT</code>, <code>MaMon</code>, <code>MaTram</code>, <code>MSV</code>.{tpl_link('Data_fill_Template.xlsx')}",
     "Kiểm tra KHLM": f"<b>Yêu cầu file:</b> <code>Data_SLLM.xlsx</code><br><br><b>Sheet Data:</b> Cột D (Lớp), Cột H (Mã môn).<br><b>Sheet ThongKe:</b> Cột A (Lớp), Cột B (Mã môn).<br><br><b>Kết quả:</b> Đối soát lộ trình thiếu kèm với tên môn tương ứng.{tpl_link('Data_SLLM_Template.xlsx')}",
     "Lọc kết quả học tập của sinh viên": f"<b>Yêu cầu:</b> <code>Data_Source.xlsx</code> & <code>Data.xlsb</code><br><br><b>Data_Source.xlsx:</b> Sheet 'DSSV', Cột Q (Lớp), Cột J (Mã SV), Cột D (TK SV).<br><b>Data.xlsb:</b> File nhị phân, Cột A (Mã SV).{tpl_link('Data_Source_Template.xlsx')}{tpl_link('Data_Template.xlsb')}",
     "Lọc sinh viên học lại & học cải thiện": f"<b>Yêu cầu:</b> <code>Data_Source.xlsx</code> & <code>DanhSachDangKy.xlsx</code><br><br><b>DanhSachDangKy.xlsx:</b> Sheet 'Dangky: B,C,T' và 'Danghoc: B,G,O', Cột B (TK SV), Cột C&G (Mã môn), Cột T&O (Số TC).{tpl_link('Data_Source_Template.xlsx')}{tpl_link('DanhSachDangKy_Template.xlsx')}",
-    "Xuất Mã lớp theo GK300": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa.",
-    "Xuất KHHT theo GK300 (1*)": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa.",
-    "Xuất DSSV theo GK300 (2*)": f"<b>Yêu cầu:</b> <code>Merged_GK300.xlsx</code> tạo từ Xuất KHHT (1*) & <code>Data_Source.xlsx</code><br><b>Merged_GK300.xlsx:</b> Sheet 'KHHT_GK300', Cột L(12) là Mã LT.{tpl_link('Data_Source_Template.xlsx')}",
-    "Xuất KHHTCT theo GK300 (3*)": f"<b>Yêu cầu:</b> Sử dụng kết quả Xuất DSSV (2*), File: <code>Merged_GK300.xlsx </code>.",
-    "Thống kê số lượng theo lớp/nhóm lớp & môn (*)": f"<b>Yêu cầu:</b> File <code>Data_SLLM.xlsx</code><br><b>Sheet Data:</b> Cột L (Mã trạm).<br><b>Sheet ThongKe:</b> Cột A (Tên lớp), B (Mã môn).{tpl_link('Data_SLLM_Template.xlsx')}",
+    "Xuất Mã lớp theo GK300": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa.{tpl_link('GK300_Template.xlsx')}",
+    "Xuất KHHT theo GK300 (1*)": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa.{tpl_link('GK300_Template.xlsx')}",
+    "Xuất DSSV theo GK300 (2*)": f"<b>Yêu cầu:</b> <code>Merged_GK300.xlsx</code> tạo từ (1*) & <code>Data_Source.xlsx</code><br><b>Merged_GK300.xlsx:</b> Sheet 'KHHT_GK300', Cột L(12) là Mã LT.{tpl_link('Merged_GK300_Template.xlsx')}{tpl_link('Data_Source_Template.xlsx')}",
+    "Xuất KHHTCT theo GK300 (3*)": f"<b>Yêu cầu:</b> Cần cung cấp file <code>Merged_GK300.xlsx</code>.{tpl_link('Merged_GK300_Template.xlsx')}",
+    "Thống kê số lượng theo lớp/nhóm lớp & môn (*)": f"<b>Yêu cầu:</b> File <code>Data_SLLM.xlsx</code><br><b>Sheet Data:</b> Cột L (Mã trạm).<br><b>Sheet ThongKe:</b> Cột A (Tên lớp), B (Mã môn), Tiêu đề Cột C (Mã Trạm).{tpl_link('Data_SLLM_Template.xlsx')}",
     "Xuất môn theo ngành học (*)": f"Đầu vào là file dữ liệu môn học phân bổ theo ngành và theo khóa.{tpl_link('Mon_NganhHoc_Template.xlsx')}"
 }
 
@@ -1550,8 +1596,8 @@ with col_info:
     status_container = st.empty() 
 
 with col_action:
-    uploader_label = "Kéo thả các file Dữ liệu Nguồn vào đây" if choice in ["Gom điểm UNI", "Gom điểm"] else "Kéo thả các file Excel vào đây"
-    uploaded_files = st.file_uploader(uploader_label, accept_multiple_files=True, type=['xlsx', 'xlsb', 'xls', 'xlsm'])
+    uploader_label = "Kéo thả các file Excel hoặc file nén (ZIP/RAR) vào đây"
+    uploaded_files = st.file_uploader(uploader_label, accept_multiple_files=True, type=['xlsx', 'xlsb', 'xls', 'xlsm', 'zip', 'rar'])
     
     if st.button("🚀 XỬ LÝ DỮ LIỆU"):
         if not uploaded_files:
@@ -1568,13 +1614,9 @@ with col_action:
                     
                     data_dir = os.path.join(temp_dir, "data_source")
                     os.makedirs(data_dir, exist_ok=True)
-                    for uf in uploaded_files:
-                        with open(os.path.join(data_dir, uf.name), "wb") as f:
-                            f.write(uf.getbuffer())
+                    extract_and_flatten_files(uploaded_files, data_dir)
                 else:
-                    for uploaded_file in uploaded_files:
-                        with open(os.path.join(temp_dir, uploaded_file.name), "wb") as f:
-                            f.write(uploaded_file.getbuffer())
+                    extract_and_flatten_files(uploaded_files, temp_dir)
                 
                 with st.spinner('⚙️ Hệ thống đang xử lý, vui lòng giữ trang...'):
                     result_file = None
@@ -1597,6 +1639,7 @@ with col_action:
 
                     if result_file and os.path.exists(result_file):
                         status_container.empty()
+                        st.toast('Xử lý thành công!', icon='✅')
                         with open(result_file, "rb") as f:
                             file_data = f.read()
                         
@@ -1610,7 +1653,7 @@ with col_action:
                             mime=mime_type
                         )
                     else:
-                        st.error("❌ Xử lý thất bại. Kiểm tra cấu trúc file.")
+                        st.error("❌ Xử lý thất bại. Vui lòng kiểm tra lại cấu trúc file.")
                         
             except Exception as e:
                 status_container.empty()
