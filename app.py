@@ -4,7 +4,6 @@ import shutil
 import re
 import math
 import zipfile
-import uuid
 from datetime import datetime
 from copy import copy
 import pandas as pd
@@ -354,11 +353,11 @@ def format_excel_date(cell):
     return v.strftime("%d/%m/%Y") if isinstance(v, datetime) else (str(v) if v else "")
 
 # ==========================================
-# CÁC HÀM XỬ LÝ (WRAPPERS)
+# CÁC HÀM XỬ LÝ (WRAPPERS) VÀ ZIP EXTRACTOR MỚI
 # ==========================================
 
 def extract_and_flatten_files(uploaded_list, target_directory):
-    """Hàm cốt lõi: Lưu file, giải nén ZIP/RAR nếu có, và là phẳng đưa tất cả Excel ra thư mục gốc"""
+    import uuid
     extract_temp = os.path.join(target_directory, "_extract_temp")
     os.makedirs(extract_temp, exist_ok=True)
     
@@ -379,21 +378,23 @@ def extract_and_flatten_files(uploaded_list, target_directory):
         elif ext == '.rar':
             try:
                 import patoolib
-                patoolib.extract_archive(saved_path, outdir=extract_temp, interactive=False)
+                patoolib.extract_archive(saved_path, outdir=extract_temp, interactive=False, verbosity=-1)
                 os.remove(saved_path)
             except ImportError:
-                st.warning(f"Thư mục thiếu thư viện 'patool' để giải nén RAR ({uf.name}). Vui lòng nén thành ZIP hoặc nâng cấp hệ thống.")
+                st.warning(f"Chưa cài đặt thư viện 'patool' để giải nén RAR ({uf.name}). Vui lòng dùng định dạng ZIP.")
             except Exception as e:
-                st.error(f"Lỗi giải nén RAR ({uf.name}): {e}")
+                error_msg = str(e).lower()
+                if "could not find an executable program" in error_msg:
+                    st.error(f"**⚠️ Server thiếu phần mềm lõi để giải nén RAR ({uf.name})**\n\n**Cách khắc phục:**\n1. Tạo file `packages.txt` trên GitHub (cùng thư mục với `app.py`).\n2. Gõ vào 2 dòng: `p7zip-full` và `unrar`.\n3. Lưu file và chờ Server khởi động lại (1-2 phút).")
+                else:
+                    st.error(f"Lỗi giải nén RAR ({uf.name}): {e}")
 
-    # Lặp đệ quy vét toàn bộ file Excel mang ra ngoài thư mục đích (Target Directory)
     for root_dir, _, files in os.walk(extract_temp):
         for file in files:
             if file.lower().endswith(('.xlsx', '.xls', '.xlsb', '.xlsm')) and not file.startswith('~$'):
                 src_path = os.path.join(root_dir, file)
                 dest_path = os.path.join(target_directory, file)
                 
-                # Đổi tên nếu trùng để không mất data
                 if os.path.exists(dest_path): 
                     base, extension = os.path.splitext(file)
                     dest_path = os.path.join(target_directory, f"{base}_{uuid.uuid4().hex[:6]}{extension}")
@@ -413,7 +414,7 @@ def check_tien_quyet_logic(folder_path):
             dktq_file = os.path.join(folder_path, f)
 
     if not ketqua_file or not dktq_file:
-        raise ValueError("Không tìm thấy đủ 2 file 'Ketqua.xlsx' và 'dktq.xlsx' trong dữ liệu đã tải lên!")
+        raise ValueError("Không tìm thấy đủ 2 file 'Ketqua.xlsx' và 'dktq.xlsx' trong thư mục đã tải lên!")
 
     wb_kq = load_workbook(ketqua_file)
     ws_kq = wb_kq.active
@@ -1464,48 +1465,6 @@ def extract_class_names_logic(folder_path):
     apply_full_border(ws); auto_fit_columns(ws); wb.save(op)
     return op
 
-def extract_and_flatten_files(uploaded_list, target_directory):
-    extract_temp = os.path.join(target_directory, "_extract_temp")
-    os.makedirs(extract_temp, exist_ok=True)
-    
-    for uf in uploaded_list:
-        ext = os.path.splitext(uf.name)[1].lower()
-        saved_path = os.path.join(extract_temp, uf.name)
-        
-        with open(saved_path, "wb") as f:
-            f.write(uf.getbuffer())
-            
-        if ext == '.zip':
-            try:
-                with zipfile.ZipFile(saved_path, 'r') as zip_ref:
-                    zip_ref.extractall(extract_temp)
-                os.remove(saved_path)
-            except Exception as e:
-                st.error(f"Lỗi giải nén ZIP ({uf.name}): {e}")
-        elif ext == '.rar':
-            try:
-                import patoolib
-                patoolib.extract_archive(saved_path, outdir=extract_temp, interactive=False)
-                os.remove(saved_path)
-            except ImportError:
-                st.warning(f"Chưa cài đặt thư viện 'patool' để giải nén RAR ({uf.name}). Vui lòng dùng ZIP hoặc cài đặt patool.")
-            except Exception as e:
-                st.error(f"Lỗi giải nén RAR ({uf.name}): {e}")
-
-    for root_dir, _, files in os.walk(extract_temp):
-        for file in files:
-            if file.lower().endswith(('.xlsx', '.xls', '.xlsb', '.xlsm')) and not file.startswith('~$'):
-                src_path = os.path.join(root_dir, file)
-                dest_path = os.path.join(target_directory, file)
-                
-                if os.path.exists(dest_path): 
-                    base, extension = os.path.splitext(file)
-                    dest_path = os.path.join(target_directory, f"{base}_{uuid.uuid4().hex[:6]}{extension}")
-                    
-                shutil.move(src_path, dest_path)
-                
-    shutil.rmtree(extract_temp)
-
 # ==========================================
 # MENU SIDEBAR 
 # ==========================================
@@ -1536,7 +1495,7 @@ with st.sidebar:
     choice = menu_options[selected_label]
     
     st.markdown("---")
-    st.caption("Ver 11.2 | Advanced Zip Extractor")
+    st.caption("Ver 11.3 | Error Handling Edition")
 
 # ==========================================
 # GIAO DIỆN CHÍNH (SINGLE-SCREEN GRID LAYOUT)
@@ -1551,15 +1510,15 @@ st.markdown(f"""
 TEMPLATE_BASE_URL = "https://raw.githubusercontent.com/dangvannghia204/hou-tools/main/templates"
 
 def tpl_link(filename):
-    return f"<br><a href='{TEMPLATE_BASE_URL}/{filename}' download='{filename}' style='display: inline-block; margin-top: 10px; margin-right: 10px; padding: 6px 12px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 0.85rem;'>📥 File Mẫu: {filename}</a>"
+    return f"<br><a href='{TEMPLATE_BASE_URL}/{filename}' download='{filename}' style='display: inline-block; margin-top: 10px; margin-right: 10px; padding: 6px 12px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 0.85rem;'>📥 Tải Mẫu {filename}</a>"
 
 instructions = {
     "Gộp File Nguồn": f"Đầu vào là file <b>GK300</b> của 1 hoặc nhiều khóa (Mỗi sheet chứa bảng đăng ký).{tpl_link('GK300_Template.xlsx')}",
-    "Gom điểm UNI": f"<b>Trích xuất dữ liệu đa File (Powered by Polars & Rust):</b><br><b>1. File MSV:</b> Tải lên file Excel chứa danh sách Mã SV (ở cột đầu tiên) vào ô bên trái.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel hoặc NÉN (ZIP/RAR) cần quét vào khu vực bên phải.<br><b>Kết quả:</b> Hệ thống quét vét cạn và trả về file tổng hợp <code>Result.xlsx</code>.{tpl_link('TKSV_Template.xlsx')}",
-    "Gom điểm": f"<b>Trích xuất dữ liệu chuẩn Form BGD & Thường (Powered by Polars & Rust):</b><br><b>1. File MSV:</b> Tải lên file chứa danh sách TKSV ở cột 'TKSV'.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel hoặc NÉN (ZIP/RAR) cần quét vét cạn.<br><b>Kết quả:</b> Hệ thống tự động lấy điểm, gộp dòng, và xuất file tổng hợp.{tpl_link('TKSV_Template.xlsx')}",
+    "Gom điểm UNI": f"<b>Trích xuất dữ liệu đa File (Powered by Polars & Rust):</b><br><b>1. File MSV:</b> Tải lên file Excel chứa danh sách Mã SV (ở cột đầu tiên) vào ô bên trái.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel cần quét vào khu vực bên phải.<br><b>Kết quả:</b> Hệ thống quét vét cạn và trả về file tổng hợp <code>Result.xlsx</code>.{tpl_link('TKSV_Template.xlsx')}",
+    "Gom điểm": f"<b>Trích xuất dữ liệu chuẩn Form BGD & Thường (Powered by Polars & Rust):</b><br><b>1. File MSV:</b> Tải lên file chứa danh sách TKSV ở cột 'TKSV'.<br><b>2. Dữ liệu Nguồn:</b> Kéo thả TẤT CẢ các file Excel cần quét vét cạn.<br><b>Kết quả:</b> Hệ thống tự động lấy điểm, gộp dòng, và xuất file tổng hợp.{tpl_link('TKSV_Template.xlsx')}",
     "Tra cứu điểm sinh viên (Cả lớp)": f"<b>Tự động Scraping EHOU (Headless):</b><br><br><b>File yêu cầu:</b> Excel chuẩn bị sẵn với 2 sheet:<br><b>1. Sheet 'Login':</b> Ô A2 (Tài khoản), Ô B2 (Mật khẩu).<br><b>2. Sheet 'Data':</b> Cột 1 (Tài khoản SV), Các cột sau chứa mã môn học.{tpl_link('TraCuuDiem_Template.xlsx')}",
     "Kiểm tra điều kiện đăng ký môn học (Cả lớp)": f"<b>Yêu cầu file:</b> Sử dụng kết quả: Tra cứu điểm sinh viên (Cả lớp 1*).<br><b>Tùy chọn:</b> Có thể xác định file có chứa dòng tiêu đề hay không.<br><b>Kết quả:</b> Đánh giá điều kiện đạt (YES/NO) và phân loại trạng thái (TL/TL1).",
-    "Kiểm tra tiên quyết": f"<b>Yêu cầu file:</b> Upload đồng thời 2 file <code>Ketqua.xlsx</code> và <code>dktq.xlsx</code> (hoặc nén file ZIP).<br><br><b>Kết quả:</b> Đối soát môn tiên quyết và trả về file nén chứa <code>Ketqua_Finish.xlsx</code> và <code>dktq_Finish.xlsx</code>.{tpl_link('Ketqua_Template.xlsx')}{tpl_link('dktq_Template.xlsx')}",
+    "Kiểm tra tiên quyết": f"<b>Yêu cầu file:</b> Upload đồng thời 2 file <code>Ketqua.xlsx</code> và <code>dktq.xlsx</code>.<br><br><b>Kết quả:</b> Đối soát môn tiên quyết và trả về file nén chứa <code>Ketqua_Finish.xlsx</code> và <code>dktq_Finish.xlsx</code>.{tpl_link('Ketqua_Template.xlsx')}{tpl_link('dktq_Template.xlsx')}",
     "Điền KHLM (Updated) (*)": f"<b>Yêu cầu file:</b> <code>Data_fill.xlsx</code><br><br><b>Sheet KHLM:</b> Cần có các cột <code>TenLop</code>, <code>MaMon</code>, <code>DiaPhuongKHL</code>, <code>DiaPhuongHL</code>.<br><b>Sheet Data:</b> Cần có các cột <code>LopLT</code>, <code>MaMon</code>, <code>MaTram</code>, <code>MSV</code>.{tpl_link('Data_fill_Template.xlsx')}",
     "Kiểm tra KHLM": f"<b>Yêu cầu file:</b> <code>Data_SLLM.xlsx</code><br><br><b>Sheet Data:</b> Cột D (Lớp), Cột H (Mã môn).<br><b>Sheet ThongKe:</b> Cột A (Lớp), Cột B (Mã môn).<br><br><b>Kết quả:</b> Đối soát lộ trình thiếu kèm với tên môn tương ứng.{tpl_link('Data_SLLM_Template.xlsx')}",
     "Lọc kết quả học tập của sinh viên": f"<b>Yêu cầu:</b> <code>Data_Source.xlsx</code> & <code>Data.xlsb</code><br><br><b>Data_Source.xlsx:</b> Sheet 'DSSV', Cột Q (Lớp), Cột J (Mã SV), Cột D (TK SV).<br><b>Data.xlsb:</b> File nhị phân, Cột A (Mã SV).{tpl_link('Data_Source_Template.xlsx')}{tpl_link('Data_Template.xlsb')}",
@@ -1596,7 +1555,7 @@ with col_info:
     status_container = st.empty() 
 
 with col_action:
-    uploader_label = "Kéo thả các file Excel hoặc file nén (ZIP/RAR) vào đây"
+    uploader_label = "Kéo thả các file Dữ liệu Nguồn vào đây" if choice in ["Gom điểm UNI", "Gom điểm"] else "Kéo thả các file Excel hoặc Nén (ZIP/RAR) vào đây"
     uploaded_files = st.file_uploader(uploader_label, accept_multiple_files=True, type=['xlsx', 'xlsb', 'xls', 'xlsm', 'zip', 'rar'])
     
     if st.button("🚀 XỬ LÝ DỮ LIỆU"):
